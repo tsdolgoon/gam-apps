@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PATH -split ';' | Where-Object { $_ -ne '' })",
+      "PowerShell($excel = New-Object -ComObject Excel.Application -ErrorAction SilentlyContinue; if \\($excel\\) { \"Excel COM available: \" + $excel.Version; $excel.Quit\\(\\) } else { \"Excel COM not available\" })",
+      "PowerShell(& \"C:\\\\Users\\\\dulguun\\\\GAM apps\\\\build_wb1_config.ps1\" 2>&1)",
+      "PowerShell(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\dulguun\\\\GAM apps\\\\build_wb1_config.ps1\" 2>&1)",
+      "PowerShell(Test-Path \"C:\\\\Users\\\\dulguun\\\\GAM apps\\\\SGF_URF_Fund_Config.xlsx\"; \\(Get-Item \"C:\\\\Users\\\\dulguun\\\\GAM apps\\\\SGF_URF_Fund_Config.xlsx\"\\).Length)",
+      "Bash(python -c \"import openpyxl; print\\('ok'\\)\")",
+      "Bash(ls -la \"C:\\\\Users\\\\dulguun\\\\Downloads\\\\GAM - Fund info.xlsx\" 2>&1)",
+      "Bash(python -c \"import openpyxl; print\\(openpyxl.__version__\\)\")",
+      "Bash(py -c \"import openpyxl; print\\(openpyxl.__version__\\)\")",
+      "Bash(cd /tmp/gamx && cat xl/workbook.xml | tr '>' '>\\\\n' | grep -i sheet)",
+      "Bash(curl -sL -o assets/xlsx.full.min.js \"https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js\")",
+      "Bash(node --check assets/app.js)",
+      "PowerShell($cmds = 'node','npx','python','py','php'; foreach\\($c in $cmds\\){ $p = \\(Get-Command $c -ErrorAction SilentlyContinue\\); if\\($p\\){ \"$c -> $\\($p.Source\\)\" } else { \"$c -> \\(none\\)\" } })",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(grep -v '^$')",
+      "Bash(cd \"C:\\\\Users\\\\dulguun\" && find Downloads Pictures Desktop \"AppData/Local/Temp\" -maxdepth 3 -type f \\\\\\( -iname \"*.png\" -o -iname \"*.jpg\" -o -iname \"*.jpeg\" -o -iname \"*.svg\" -o -iname \"*.webp\" \\\\\\) -newermt \"2026-06-08 11:00\" 2>/dev/null | head -30)",
+      "PowerShell(Get-ChildItem -Path \"$env:USERPROFILE\\\\Downloads\" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 12 Name,Length,LastWriteTime)",
+      "Bash(grep -iE '\\\\.\\(png|jpg|jpeg|webp\\)$')"
+    ]
+  }
+}

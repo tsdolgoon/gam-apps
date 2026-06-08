@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GAM Back Office — Голомт Ассет Менежмент</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script src="assets/xlsx.full.min.js"></script>
+</head>
+<body>
+  <!-- ===== Top bar ===== -->
+  <header class="topbar">
+    <div class="tb-left">
+      <img class="logo-img" src="assets/logo.png" alt="Golomt Asset Management"
+           onerror="this.style.display='none';document.getElementById('logoFallback').style.display='grid';">
+      <div class="logo" id="logoFallback" style="display:none">GAM</div>
+    </div>
+    <div class="tb-center brand-text">
+      <strong>Голомт Ассет Менежмент</strong>
+      <span>Back-Office System · Бэк-офис систем</span>
+    </div>
+    <div class="file-status tb-right" id="fileStatus">
+      <span class="dot dot-off" id="connDot"></span>
+      <div class="file-meta">
+        <span id="fileName">Холбогдоогүй · Not connected</span>
+        <small id="fileSaved"></small>
+      </div>
+      <button class="btn btn-light" id="btnReload" title="Файлаас дахин ачаалах">↻</button>
+      <button class="btn btn-primary" id="btnSave" title="Хадгалах (OneDrive рүү синк хийгдэнэ)">Хадгалах</button>
+    </div>
+  </header>
+
+  <!-- ===== Connect gate (shown until a workbook is open) ===== -->
+  <section class="gate" id="gate">
+    <div class="gate-card">
+      <h1>Тавтай морил</h1>
+      <p class="muted">GAM бэк-офис системийн өгөгдөл нь таны OneDrive дээрх нэг Excel файлд хадгалагдана.
+        Эхлэхийн тулд өгөгдлийн файлаа сонгоно уу.</p>
+      <p class="muted small">All data is stored in a single Excel workbook on your OneDrive. Pick or create it to begin.</p>
+      <div class="gate-actions">
+        <button class="btn btn-primary btn-lg" id="btnOpen">📂 Файл нээх<small>Open existing workbook</small></button>
+        <button class="btn btn-outline btn-lg" id="btnCreate">✨ Шинээр үүсгэх<small>Create new workbook</small></button>
+      </div>
+      <div class="gate-hint" id="gateHint"></div>
+      <details class="gate-help">
+        <summary>Заавар · How it works</summary>
+        <ol>
+          <li>OneDrive хавтас доторх <code>GAM_BackOffice.xlsx</code> файлыг сонгоно (эсвэл шинээр үүсгэнэ).</li>
+          <li>Та өгөгдөл оруулах бүрд "Хадгалах" дарна — OneDrive автоматаар үүлэн рүү синк хийнэ.</li>
+          <li>Дараагийн удаа апп нь сүүлд нээсэн файлыг санаж, шууд холбогдоно.</li>
+        </ol>
+        <p class="small muted">Microsoft Edge эсвэл Google Chrome ашиглана уу (File System Access API шаардлагатай).</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- ===== Main app ===== -->
+  <div class="layout hidden" id="app">
+    <nav class="sidebar">
+      <button class="nav-item active" data-view="dashboard"><span class="ico">▦</span> Хяналтын самбар<small>Dashboard</small></button>
+      <button class="nav-item" data-view="investors"><span class="ico">👤</span> Хөрөнгө оруулагч<small>Investors</small></button>
+      <button class="nav-item" data-view="subscribe"><span class="ico">＋</span> Худалдан авалт<small>Subscription</small></button>
+      <button class="nav-item" data-view="redeem"><span class="ico">－</span> Буцаан худалдалт<small>Redemption</small></button>
+      <button class="nav-item" data-view="transactions"><span class="ico">≣</span> Гүйлгээний түүх<small>Transactions</small></button>
+      <button class="nav-item" data-view="funds"><span class="ico">🏛</span> Сангууд<small>Funds</small></button>
+      <button class="nav-item" data-view="nav"><span class="ico">📈</span> НЦХҮ / NAV<small>Net Asset Value</small></button>
+      <button class="nav-item" data-view="fees"><span class="ico">％</span> Шимтгэл<small>Mgmt & Performance fees</small></button>
+      <button class="nav-item" data-view="ecif"><span class="ico">👥</span> ECIF — Хуримтлал<small>Employee savings (ECIF)</small></button>
+    </nav>
+    <main class="content" id="content"><!-- views render here --></main>
+  </div>
+
+  <!-- ===== Modal host ===== -->
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <!-- ===== Toast host ===== -->
+  <div class="toast-host" id="toastHost"></div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
