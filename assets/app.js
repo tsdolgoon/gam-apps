@@ -196,21 +196,88 @@ async function signOut(){
   updateFileStatus();
 }
 
-async function findOrCreateWorkbook(){
+async function testSharePointAccess(){
+  console.log('[GAM] ========= SharePoint Access Test =========');
+  let token;
+  try{ token = await getToken(); }
+  catch(e){ console.error('[GAM] getToken() failed:', e); return; }
+
+  // Decode and log token claims
   try{
-    const siteId = await getSpSiteId();
-    const resp = await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content');
-    loadWorkbookBuffer(await resp.arrayBuffer());
-    enterApp();
-    toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
-  }catch(e){
-    if(e.status===404){
-      await createWorkbookOnSharePoint();
-    }else{
-      gateError('SharePoint алдаа: '+e.message);
-      console.error(e);
-    }
+    const p = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    console.log('[GAM] Token scp   :', p.scp);
+    console.log('[GAM] Token aud   :', p.aud);
+    console.log('[GAM] Token upn   :', p.upn);
+    console.log('[GAM] Token roles :', p.roles);
+  }catch{ console.warn('[GAM] Could not decode token payload'); }
+
+  const hdrs = { Authorization: 'Bearer '+token };
+
+  // Test 1 — site lookup
+  const siteUrl = 'https://graph.microsoft.com/v1.0/sites/'+_SP_HOST+':/';
+  console.log('[GAM] --- Test 1: GET', siteUrl, '---');
+  try{
+    const r = await fetch(siteUrl, { headers: hdrs });
+    console.log('[GAM] Status:', r.status, r.statusText);
+    const h = {}; r.headers.forEach((v,k) => h[k]=v);
+    console.log('[GAM] Headers:', h);
+    console.log('[GAM] Body:', await r.text());
+  }catch(e){ console.error('[GAM] Fetch error:', e); }
+
+  // Test 2 — personal drive (baseline)
+  const driveUrl = 'https://graph.microsoft.com/v1.0/me/drive';
+  console.log('[GAM] --- Test 2: GET', driveUrl, '---');
+  try{
+    const r = await fetch(driveUrl, { headers: hdrs });
+    console.log('[GAM] Status:', r.status, r.statusText);
+    console.log('[GAM] Body:', await r.text());
+  }catch(e){ console.error('[GAM] Fetch error:', e); }
+
+  console.log('[GAM] =============================================');
+}
+
+async function findOrCreateWorkbook(){
+  let token;
+  try{ token = await getToken(); }
+  catch(e){ gateError('Токен авахад алдаа: '+e.message); return; }
+
+  // Log token scopes so we can see exactly what was granted
+  try{
+    const p = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    console.log('[GAM] findOrCreateWorkbook — token scp:', p.scp, '| aud:', p.aud);
+  }catch{}
+
+  let siteId;
+  try{ siteId = await getSpSiteId(); }
+  catch(e){
+    console.error('[GAM] getSpSiteId() failed:', e);
+    gateError('SharePoint сайтын ID авахад алдаа: '+e.message);
+    return;
   }
+
+  const url = 'https://graph.microsoft.com/v1.0/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content';
+  console.log('[GAM] findOrCreateWorkbook URL:', url);
+
+  // Raw fetch so we can log headers + body before throwing
+  let rawResp;
+  try{ rawResp = await fetch(url, { headers: { Authorization: 'Bearer '+token } }); }
+  catch(e){ gateError('SharePoint алдаа: '+e.message); console.error('[GAM]', e); return; }
+
+  const respHdr = {}; rawResp.headers.forEach((v,k) => respHdr[k]=v);
+  console.log('[GAM] Response status:', rawResp.status, rawResp.statusText);
+  console.log('[GAM] Response headers:', respHdr);
+
+  if(!rawResp.ok){
+    const body = await rawResp.text();
+    console.log('[GAM] Error body:', body);
+    if(rawResp.status===404){ await createWorkbookOnSharePoint(); return; }
+    gateError('SharePoint алдаа '+rawResp.status+': '+body.slice(0,200));
+    return;
+  }
+
+  loadWorkbookBuffer(await rawResp.arrayBuffer());
+  enterApp();
+  toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
 }
 
 async function createWorkbookOnSharePoint(){
@@ -1424,6 +1491,7 @@ async function init(){
       state.account = account;
       updateTopBarUser();
       gateInfo('SharePoint-аас файлыг хайж байна…');
+      await testSharePointAccess();
       await findOrCreateWorkbook();
     }
   }catch(e){ console.warn('MSAL restore:', e); }
