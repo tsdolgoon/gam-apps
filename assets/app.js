@@ -146,8 +146,8 @@ async function getToken(){
     const r = await msalApp.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: acct });
     return r.accessToken;
   }catch{
-    const r = await msalApp.acquireTokenPopup({ scopes: GRAPH_SCOPES });
-    return r.accessToken;
+    await msalApp.acquireTokenRedirect({ scopes: GRAPH_SCOPES });
+    throw new Error('Redirecting for token…');
   }
 }
 
@@ -167,20 +167,15 @@ async function gFetch(path, opts={}){
    ============================================================ */
 async function signIn(){
   try{
-    const result = await msalApp.loginPopup({ scopes: GRAPH_SCOPES });
-    msalApp.setActiveAccount(result.account);
-    state.account = result.account;
-    updateTopBarUser();
-    gateInfo('SharePoint-аас файлыг хайж байна…');
-    await findOrCreateWorkbook();
+    await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
+    // browser navigates away; init() handles the return via handleRedirectPromise()
   }catch(e){
-    if(e.errorCode==='user_cancelled'||e.errorCode==='popup_window_error') return;
     gateError('Нэвтрэхэд алдаа: '+(e.message||String(e)));
   }
 }
 
 async function signOut(){
-  try{ await msalApp.logoutPopup({ account: msalApp.getActiveAccount() }); }catch{}
+  try{ await msalApp.logoutRedirect({ account: msalApp.getActiveAccount() }); }catch{}
   state.account = null;
   state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Fees:[],
     ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] };
@@ -1405,13 +1400,13 @@ async function init(){
 
   window.addEventListener('beforeunload',e=>{ if(state.dirty){ e.preventDefault(); e.returnValue=''; } });
 
-  // restore session if a cached account exists
+  // handle redirect return (login or token refresh) or restore a cached session
   try{
-    await msalApp.handleRedirectPromise();
-    const accounts = msalApp.getAllAccounts();
-    if(accounts.length){
-      msalApp.setActiveAccount(accounts[0]);
-      state.account = accounts[0];
+    const result = await msalApp.handleRedirectPromise();
+    const account = result ? result.account : (msalApp.getAllAccounts()[0] || null);
+    if(account){
+      msalApp.setActiveAccount(account);
+      state.account = account;
       updateTopBarUser();
       gateInfo('SharePoint-аас файлыг хайж байна…');
       await findOrCreateWorkbook();
