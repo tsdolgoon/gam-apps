@@ -135,8 +135,7 @@ const MSAL_CONFIG = {
 const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
 const FILE_NAME = SHARED_FILE_PATH.split('/').pop();
 const _SP_HOST = new URL(SHAREPOINT_SITE).hostname;
-// Drive-relative path: strip the library name (first path segment) from SHARED_FILE_PATH
-const _SP_DRIVE_PATH = '/' + SHARED_FILE_PATH.split('/').filter(Boolean).slice(1).join('/');
+const _SP_DRIVE_PATH = SHARED_FILE_PATH;
 const msalApp = new msal.PublicClientApplication(MSAL_CONFIG);
 
 async function getToken(){
@@ -160,6 +159,15 @@ async function gFetch(path, opts={}){
   if(resp.status===404){ const e=new Error('Graph404'); e.status=404; throw e; }
   if(!resp.ok) throw new Error('Graph '+resp.status+': '+(await resp.text().catch(()=>'')));
   return resp;
+}
+
+let _spSiteId = null;
+async function getSpSiteId(){
+  if(_spSiteId) return _spSiteId;
+  const resp = await gFetch('/sites/'+_SP_HOST+':/');
+  const data = await resp.json();
+  _spSiteId = data.id;
+  return _spSiteId;
 }
 
 /* ============================================================
@@ -190,7 +198,8 @@ async function signOut(){
 
 async function findOrCreateWorkbook(){
   try{
-    const resp = await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content');
+    const siteId = await getSpSiteId();
+    const resp = await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content');
     loadWorkbookBuffer(await resp.arrayBuffer());
     enterApp();
     toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
@@ -243,14 +252,18 @@ function loadWorkbookBuffer(buf){
 }
 
 async function ensureSpFolder(){
-  const folderPath = _SP_DRIVE_PATH.split('/').slice(0, -1).join('/');
-  if(!folderPath) return;
+  const siteId = await getSpSiteId();
+  const parts = _SP_DRIVE_PATH.split('/').filter(Boolean);
+  const folderParts = parts.slice(0, -1); // e.g. ['Shared Documents', 'GAM Back Office']
+  if(!folderParts.length) return;
+  const folderDrivePath = '/' + folderParts.join('/');
   try{
-    await gFetch('/sites/'+_SP_HOST+'/drive/root:'+folderPath);
+    await gFetch('/sites/'+siteId+'/drive/root:'+folderDrivePath);
   }catch(e){
     if(e.status===404){
-      const name = folderPath.split('/').pop();
-      await gFetch('/sites/'+_SP_HOST+'/drive/root/children',{
+      const name = folderParts[folderParts.length-1];
+      const parentDrivePath = '/' + folderParts.slice(0,-1).join('/');
+      await gFetch('/sites/'+siteId+'/drive/root:'+parentDrivePath+':/children',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({name, folder:{}, '@microsoft.graph.conflictBehavior':'replace'}),
@@ -268,8 +281,9 @@ async function saveToSharePoint(silent){
     XLSX.utils.book_append_sheet(wb,ws,sheet);
   }
   const out = XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  const siteId = await getSpSiteId();
   await ensureSpFolder();
-  await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content',{
+  await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content',{
     method: 'PUT',
     headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
     body: new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
@@ -283,7 +297,8 @@ async function saveToSharePoint(silent){
 async function reloadFromSharePoint(){
   if(!state.account) return;
   try{
-    const resp = await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content');
+    const siteId = await getSpSiteId();
+    const resp = await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content');
     loadWorkbookBuffer(await resp.arrayBuffer());
     render();
     toast('SharePoint-аас дахин ачаалагдлаа.','ok');
