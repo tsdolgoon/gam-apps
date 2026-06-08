@@ -1,10 +1,14 @@
 /* ============================================================
    GAM Back Office — application logic
    Golomt Asset Management · subscription / redemption / NAV
-   Data layer: File System Access API + SheetJS, backend = one
-   .xlsx on the user's OneDrive-synced folder.
+   Data layer: MSAL + Microsoft Graph + SheetJS, backend = one
+   shared .xlsx on the Golomt Asset Management SharePoint site.
    ============================================================ */
 'use strict';
+
+/* ---------- SharePoint configuration ---------- */
+const SHAREPOINT_SITE = "https://golomtasset.sharepoint.com";
+const SHARED_FILE_PATH = "/Shared Documents/GAM Back Office/GAM_BackOffice.xlsx";
 
 /* ---------- Schema: sheet -> ordered columns ---------- */
 const SCHEMA = {
@@ -129,7 +133,10 @@ const MSAL_CONFIG = {
   cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true },
 };
 const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
-const FILE_NAME = 'GAM_BackOffice.xlsx';
+const FILE_NAME = SHARED_FILE_PATH.split('/').pop();
+const _SP_HOST = new URL(SHAREPOINT_SITE).hostname;
+// Drive-relative path: strip the library name (first path segment) from SHARED_FILE_PATH
+const _SP_DRIVE_PATH = '/' + SHARED_FILE_PATH.split('/').filter(Boolean).slice(1).join('/');
 const msalApp = new msal.PublicClientApplication(MSAL_CONFIG);
 
 async function getToken(){
@@ -156,7 +163,7 @@ async function gFetch(path, opts={}){
 }
 
 /* ============================================================
-   OneDrive workbook operations
+   SharePoint workbook operations
    ============================================================ */
 async function signIn(){
   try{
@@ -164,7 +171,7 @@ async function signIn(){
     msalApp.setActiveAccount(result.account);
     state.account = result.account;
     updateTopBarUser();
-    gateInfo('OneDrive-аас файлыг хайж байна…');
+    gateInfo('SharePoint-аас файлыг хайж байна…');
     await findOrCreateWorkbook();
   }catch(e){
     if(e.errorCode==='user_cancelled'||e.errorCode==='popup_window_error') return;
@@ -188,22 +195,22 @@ async function signOut(){
 
 async function findOrCreateWorkbook(){
   try{
-    const resp = await gFetch('/me/drive/root:/'+FILE_NAME+':/content');
+    const resp = await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content');
     loadWorkbookBuffer(await resp.arrayBuffer());
     enterApp();
-    toast('OneDrive-аас файл ачааллаа.','ok','Холбогдлоо');
+    toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
   }catch(e){
     if(e.status===404){
-      await createWorkbookOnOneDrive();
+      await createWorkbookOnSharePoint();
     }else{
-      gateError('OneDrive алдаа: '+e.message);
+      gateError('SharePoint алдаа: '+e.message);
       console.error(e);
     }
   }
 }
 
-async function createWorkbookOnOneDrive(){
-  gateInfo(FILE_NAME+' файлыг OneDrive дээр үүсгэж байна…');
+async function createWorkbookOnSharePoint(){
+  gateInfo(FILE_NAME+' файлыг SharePoint дээр үүсгэж байна…');
   state.data = {
     Funds: SEED_FUNDS.map(f=>({...f})),
     Investors:[], Transactions:[], NAVHistory:[], Fees:[],
@@ -220,8 +227,8 @@ async function createWorkbookOnOneDrive(){
       Source: 'Нэрлэсэн үнэ', Notes: 'Анхны нэгж эрхийн үнэ',
     });
   }
-  await saveToOneDrive(true);
-  toast('Шинэ '+FILE_NAME+' файл үүсгэж OneDrive-д хадгаллаа.','ok','Бэлэн боллоо');
+  await saveToSharePoint(true);
+  toast('Шинэ '+FILE_NAME+' файл үүсгэж SharePoint-д хадгаллаа.','ok','Бэлэн боллоо');
   enterApp();
 }
 
@@ -240,7 +247,24 @@ function loadWorkbookBuffer(buf){
   state.savedAt = new Date();
 }
 
-async function saveToOneDrive(silent){
+async function ensureSpFolder(){
+  const folderPath = _SP_DRIVE_PATH.split('/').slice(0, -1).join('/');
+  if(!folderPath) return;
+  try{
+    await gFetch('/sites/'+_SP_HOST+'/drive/root:'+folderPath);
+  }catch(e){
+    if(e.status===404){
+      const name = folderPath.split('/').pop();
+      await gFetch('/sites/'+_SP_HOST+'/drive/root/children',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name, folder:{}, '@microsoft.graph.conflictBehavior':'replace'}),
+      });
+    }else{ throw e; }
+  }
+}
+
+async function saveToSharePoint(silent){
   if(!state.account) return;
   const wb = XLSX.utils.book_new();
   for(const[sheet,cols] of Object.entries(SCHEMA)){
@@ -249,7 +273,8 @@ async function saveToOneDrive(silent){
     XLSX.utils.book_append_sheet(wb,ws,sheet);
   }
   const out = XLSX.write(wb,{bookType:'xlsx',type:'array'});
-  await gFetch('/me/drive/root:/'+FILE_NAME+':/content',{
+  await ensureSpFolder();
+  await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content',{
     method: 'PUT',
     headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
     body: new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
@@ -257,16 +282,16 @@ async function saveToOneDrive(silent){
   state.dirty = false;
   state.savedAt = new Date();
   updateFileStatus();
-  if(!silent) toast('OneDrive рүү хадгалагдлаа.','ok','Хадгалсан');
+  if(!silent) toast('SharePoint рүү хадгалагдлаа.','ok','Хадгалсан');
 }
 
-async function reloadFromOneDrive(){
+async function reloadFromSharePoint(){
   if(!state.account) return;
   try{
-    const resp = await gFetch('/me/drive/root:/'+FILE_NAME+':/content');
+    const resp = await gFetch('/sites/'+_SP_HOST+'/drive/root:'+_SP_DRIVE_PATH+':/content');
     loadWorkbookBuffer(await resp.arrayBuffer());
     render();
-    toast('OneDrive-аас дахин ачаалагдлаа.','ok');
+    toast('SharePoint-аас дахин ачаалагдлаа.','ok');
   }catch(e){
     toast('Дахин ачааллахад алдаа: '+e.message,'err');
   }
@@ -274,7 +299,7 @@ async function reloadFromOneDrive(){
 
 /** mutate + autosave helper */
 async function commit(fn, okMsg){
-  try{ fn(); state.dirty=true; updateFileStatus(); await saveToOneDrive(true);
+  try{ fn(); state.dirty=true; updateFileStatus(); await saveToSharePoint(true);
     if(okMsg) toast(okMsg,'ok','Амжилттай'); render();
   }catch(e){ toast(e.message||'Алдаа гарлаа','err','Алдаа'); console.error(e); }
 }
@@ -1373,8 +1398,8 @@ function confirmModal(title,msg,onYes){
    ============================================================ */
 async function init(){
   $('#btnSignIn').onclick = signIn;
-  $('#btnSave').onclick   = ()=>saveToOneDrive(false);
-  $('#btnReload').onclick = reloadFromOneDrive;
+  $('#btnSave').onclick   = ()=>saveToSharePoint(false);
+  $('#btnReload').onclick = reloadFromSharePoint;
   $('#btnSignOut').onclick= signOut;
   $$('.nav-item').forEach(b=>b.onclick=()=>go(b.dataset.view));
 
@@ -1388,7 +1413,7 @@ async function init(){
       msalApp.setActiveAccount(accounts[0]);
       state.account = accounts[0];
       updateTopBarUser();
-      gateInfo('OneDrive-аас файлыг хайж байна…');
+      gateInfo('SharePoint-аас файлыг хайж байна…');
       await findOrCreateWorkbook();
     }
   }catch(e){ console.warn('MSAL restore:', e); }
