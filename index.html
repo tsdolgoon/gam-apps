@@ -19,37 +19,56 @@
       <strong>Голомт Ассет Менежмент</strong>
       <span>Back-Office System · Бэк-офис систем</span>
     </div>
-    <div class="file-status tb-right" id="fileStatus">
-      <span class="dot dot-off" id="connDot"></span>
-      <div class="file-meta">
-        <span id="fileName">Холбогдоогүй · Not connected</span>
-        <small id="fileSaved"></small>
+    <div class="tb-right">
+      <div class="user-info hidden" id="userInfo">
+        <div class="user-meta">
+          <span id="userName"></span>
+          <small id="userEmail"></small>
+        </div>
+        <button class="btn btn-light btn-sm" id="btnSignOut">Гарах · Sign out</button>
       </div>
-      <button class="btn btn-light" id="btnReload" title="Файлаас дахин ачаалах">↻</button>
-      <button class="btn btn-primary" id="btnSave" title="Хадгалах (OneDrive рүү синк хийгдэнэ)">Хадгалах</button>
+      <div class="file-status" id="fileStatus">
+        <span class="dot dot-off" id="connDot"></span>
+        <div class="file-meta">
+          <span id="fileName">Холбогдоогүй · Not connected</span>
+          <small id="fileSaved"></small>
+        </div>
+        <button class="btn btn-light" id="btnReload" title="OneDrive-аас дахин ачаалах">↻</button>
+        <button class="btn btn-primary" id="btnSave" title="OneDrive рүү хадгалах">Хадгалах</button>
+      </div>
     </div>
   </header>
 
-  <!-- ===== Connect gate (shown until a workbook is open) ===== -->
+  <!-- ===== Connect gate (shown until signed in) ===== -->
   <section class="gate" id="gate">
     <div class="gate-card">
       <h1>Тавтай морил</h1>
-      <p class="muted">GAM бэк-офис системийн өгөгдөл нь таны OneDrive дээрх нэг Excel файлд хадгалагдана.
-        Эхлэхийн тулд өгөгдлийн файлаа сонгоно уу.</p>
-      <p class="muted small">All data is stored in a single Excel workbook on your OneDrive. Pick or create it to begin.</p>
+      <p class="muted">GAM бэк-офис системд нэвтрэхийн тулд Голомт Ассет Менежментийн Microsoft 365
+        акаунтаар нэвтэрнэ үү. Өгөгдөл таны OneDrive дээрх <code>GAM_BackOffice.xlsx</code> файлд хадгалагдана.</p>
+      <p class="muted small">Sign in with your Golomt Asset Management Microsoft 365 account.
+        Data is stored in GAM_BackOffice.xlsx on your OneDrive — created automatically if it doesn't exist.</p>
       <div class="gate-actions">
-        <button class="btn btn-primary btn-lg" id="btnOpen">📂 Файл нээх<small>Open existing workbook</small></button>
-        <button class="btn btn-outline btn-lg" id="btnCreate">✨ Шинээр үүсгэх<small>Create new workbook</small></button>
+        <button class="btn btn-ms btn-lg" id="btnSignIn">
+          <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+            <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+            <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+            <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+          </svg>
+          Microsoft-ээр нэвтрэх
+          <small>Sign in with Microsoft 365</small>
+        </button>
       </div>
       <div class="gate-hint" id="gateHint"></div>
       <details class="gate-help">
         <summary>Заавар · How it works</summary>
         <ol>
-          <li>OneDrive хавтас доторх <code>GAM_BackOffice.xlsx</code> файлыг сонгоно (эсвэл шинээр үүсгэнэ).</li>
-          <li>Та өгөгдөл оруулах бүрд "Хадгалах" дарна — OneDrive автоматаар үүлэн рүү синк хийнэ.</li>
-          <li>Дараагийн удаа апп нь сүүлд нээсэн файлыг санаж, шууд холбогдоно.</li>
+          <li>«Microsoft-ээр нэвтрэх» дарж GAM-ийн Microsoft 365 акаунтаар нэвтэрнэ.</li>
+          <li>Систем таны OneDrive дээрх <code>GAM_BackOffice.xlsx</code> файлыг автоматаар олно — байхгүй бол шинээр үүсгэнэ.</li>
+          <li>«Хадгалах» дарах бүрд файл OneDrive рүү шинэчлэгдэнэ.</li>
+          <li>Дараагийн удаа ижил акаунтаар нэвтрэхэд өгөгдөл автоматаар ачаалагдана.</li>
         </ol>
-        <p class="small muted">Microsoft Edge эсвэл Google Chrome ашиглана уу (File System Access API шаардлагатай).</p>
+        <p class="small muted">Microsoft Edge эсвэл Google Chrome ашиглана уу.</p>
       </details>
     </div>
   </section>
@@ -78,6 +97,7 @@
   <!-- ===== Toast host ===== -->
   <div class="toast-host" id="toastHost"></div>
 
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js" crossorigin="anonymous"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>

@@ -64,7 +64,7 @@ const INV_STATUS = ['Идэвхтэй','Идэвхгүй'];
    State
    ============================================================ */
 const state = {
-  handle: null,
+  account: null,
   data: { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Fees:[], ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] },
   dirty: false,
   view: 'dashboard',
@@ -118,117 +118,169 @@ function toast(msg, kind='ok', title){
 }
 
 /* ============================================================
-   IndexedDB — persist the file handle between sessions
+   Microsoft Authentication — MSAL.js 2.x
    ============================================================ */
-const IDB={
-  _db:null,
-  open(){ return new Promise((res,rej)=>{ if(this._db)return res(this._db);
-    const r=indexedDB.open('gam-backoffice',1);
-    r.onupgradeneeded=()=>r.result.createObjectStore('kv');
-    r.onsuccess=()=>{this._db=r.result;res(this._db);}; r.onerror=()=>rej(r.error); }); },
-  async set(k,v){ const db=await this.open(); return new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite');
-    tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); },
-  async get(k){ const db=await this.open(); return new Promise((res,rej)=>{ const tx=db.transaction('kv','readonly');
-    const rq=tx.objectStore('kv').get(k); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); },
+const MSAL_CONFIG = {
+  auth: {
+    clientId: '0873a639-ed1f-4351-8d83-290e42775899',
+    authority: 'https://login.microsoftonline.com/3aeede26-447f-4658-9da0-918778fa4255',
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true },
 };
+const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
+const FILE_NAME = 'GAM_BackOffice.xlsx';
+const msalApp = new msal.PublicClientApplication(MSAL_CONFIG);
+
+async function getToken(){
+  const acct = msalApp.getActiveAccount();
+  if(!acct) throw new Error('Нэвтрээгүй байна.');
+  try{
+    const r = await msalApp.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: acct });
+    return r.accessToken;
+  }catch{
+    const r = await msalApp.acquireTokenPopup({ scopes: GRAPH_SCOPES });
+    return r.accessToken;
+  }
+}
+
+async function gFetch(path, opts={}){
+  const token = await getToken();
+  const resp = await fetch('https://graph.microsoft.com/v1.0'+path, {
+    ...opts,
+    headers: { Authorization: 'Bearer '+token, ...(opts.headers||{}) },
+  });
+  if(resp.status===404){ const e=new Error('Graph404'); e.status=404; throw e; }
+  if(!resp.ok) throw new Error('Graph '+resp.status+': '+(await resp.text().catch(()=>'')));
+  return resp;
+}
 
 /* ============================================================
-   File System Access — open / create / load / save
+   OneDrive workbook operations
    ============================================================ */
-function fsaSupported(){ return 'showOpenFilePicker' in window; }
-
-async function verifyPermission(handle, write){
-  const opts={mode: write?'readwrite':'read'};
-  if((await handle.queryPermission(opts))==='granted') return true;
-  if((await handle.requestPermission(opts))==='granted') return true;
-  return false;
-}
-
-async function openWorkbook(){
-  if(!fsaSupported()) return gateError('Энэ хөтөч дэмжихгүй байна. Microsoft Edge эсвэл Chrome ашиглана уу.');
+async function signIn(){
   try{
-    const [handle]=await window.showOpenFilePicker({
-      types:[{description:'Excel workbook',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}],
-    });
-    if(!await verifyPermission(handle,true)) return gateError('Бичих эрх олгогдсонгүй.');
-    state.handle=handle;
-    await loadFromHandle();
-    await IDB.set('workbookHandle',handle);
-    enterApp();
-  }catch(e){ if(e.name!=='AbortError') gateError('Файл нээхэд алдаа гарлаа: '+e.message); }
-}
-
-async function createWorkbook(){
-  if(!fsaSupported()) return gateError('Энэ хөтөч дэмжихгүй байна. Microsoft Edge эсвэл Chrome ашиглана уу.');
-  try{
-    const handle=await window.showSaveFilePicker({
-      suggestedName:'GAM_BackOffice.xlsx',
-      types:[{description:'Excel workbook',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}],
-    });
-    if(!await verifyPermission(handle,true)) return gateError('Бичих эрх олгогдсонгүй.');
-    state.handle=handle;
-    // seed
-    state.data={ Funds:SEED_FUNDS.map(f=>({...f})), Investors:[], Transactions:[], NAVHistory:[], Fees:[],
-      ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[],
-      Meta:[{Key:'SchemaVersion',Value:SCHEMA_VERSION},{Key:'CreatedAt',Value:new Date().toISOString()},
-            {Key:'App',Value:'GAM Back Office'}] };
-    // seed initial NAV at nominal price so the first subscription has a price
-    for(const f of state.data.Funds){
-      state.data.NAVHistory.push({NavID:nextId('NAV',state.data.NAVHistory,'NavID'),Date:f.RegisteredDate,
-        FundID:f.FundID,TotalNAV:0,UnitsOutstanding:0,UnitPrice:f.NominalPrice,Source:'Нэрлэсэн үнэ',Notes:'Анхны нэгж эрхийн үнэ'});
-    }
-    await saveWorkbook(true);
-    await IDB.set('workbookHandle',handle);
-    enterApp();
-    toast('Шинэ өгөгдлийн файл үүслээ. Хоёр сан ачаалагдсан.','ok','Бэлэн боллоо');
-  }catch(e){ if(e.name!=='AbortError') gateError('Файл үүсгэхэд алдаа гарлаа: '+e.message); }
-}
-
-async function loadFromHandle(){
-  const file=await state.handle.getFile();
-  const buf=await file.arrayBuffer();
-  const wb=XLSX.read(buf,{type:'array'});
-  const data={};
-  for(const sheet of Object.keys(SCHEMA)){
-    const ws=wb.Sheets[sheet];
-    data[sheet]= ws ? XLSX.utils.sheet_to_json(ws,{defval:''}) : [];
+    const result = await msalApp.loginPopup({ scopes: GRAPH_SCOPES });
+    msalApp.setActiveAccount(result.account);
+    state.account = result.account;
+    updateTopBarUser();
+    gateInfo('OneDrive-аас файлыг хайж байна…');
+    await findOrCreateWorkbook();
+  }catch(e){
+    if(e.errorCode==='user_cancelled'||e.errorCode==='popup_window_error') return;
+    gateError('Нэвтрэхэд алдаа: '+(e.message||String(e)));
   }
-  // ensure funds exist (a fresh/blank file gets seeded)
-  if(!data.Funds || !data.Funds.length) data.Funds=SEED_FUNDS.map(f=>({...f}));
-  // migration: add any seed fund missing from older workbooks (e.g. ECIF)
-  for(const sf of SEED_FUNDS){ if(!data.Funds.some(f=>f.FundID===sf.FundID)) data.Funds.push({...sf}); }
-  if(!data.Meta || !data.Meta.length) data.Meta=[{Key:'SchemaVersion',Value:SCHEMA_VERSION}];
-  state.data=data;
-  state.dirty=false;
-  state.savedAt=new Date(file.lastModified);
 }
 
-async function saveWorkbook(silent){
-  if(!state.handle) return;
-  const wb=XLSX.utils.book_new();
+async function signOut(){
+  try{ await msalApp.logoutPopup({ account: msalApp.getActiveAccount() }); }catch{}
+  state.account = null;
+  state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Fees:[],
+    ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] };
+  state.dirty = false;
+  state.savedAt = null;
+  $('#app').classList.add('hidden');
+  $('#gate').classList.remove('hidden');
+  $('#gateHint').textContent = '';
+  updateTopBarUser();
+  updateFileStatus();
+}
+
+async function findOrCreateWorkbook(){
+  try{
+    const resp = await gFetch('/me/drive/root:/'+FILE_NAME+':/content');
+    loadWorkbookBuffer(await resp.arrayBuffer());
+    enterApp();
+    toast('OneDrive-аас файл ачааллаа.','ok','Холбогдлоо');
+  }catch(e){
+    if(e.status===404){
+      await createWorkbookOnOneDrive();
+    }else{
+      gateError('OneDrive алдаа: '+e.message);
+      console.error(e);
+    }
+  }
+}
+
+async function createWorkbookOnOneDrive(){
+  gateInfo(FILE_NAME+' файлыг OneDrive дээр үүсгэж байна…');
+  state.data = {
+    Funds: SEED_FUNDS.map(f=>({...f})),
+    Investors:[], Transactions:[], NAVHistory:[], Fees:[],
+    ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[],
+    Meta:[{Key:'SchemaVersion',Value:SCHEMA_VERSION},
+          {Key:'CreatedAt',Value:new Date().toISOString()},
+          {Key:'App',Value:'GAM Back Office'}],
+  };
+  for(const f of state.data.Funds){
+    state.data.NAVHistory.push({
+      NavID: nextId('NAV',state.data.NAVHistory,'NavID'),
+      Date: f.RegisteredDate, FundID: f.FundID,
+      TotalNAV: 0, UnitsOutstanding: 0, UnitPrice: f.NominalPrice,
+      Source: 'Нэрлэсэн үнэ', Notes: 'Анхны нэгж эрхийн үнэ',
+    });
+  }
+  await saveToOneDrive(true);
+  toast('Шинэ '+FILE_NAME+' файл үүсгэж OneDrive-д хадгаллаа.','ok','Бэлэн боллоо');
+  enterApp();
+}
+
+function loadWorkbookBuffer(buf){
+  const wb = XLSX.read(buf,{type:'array'});
+  const data = {};
+  for(const sheet of Object.keys(SCHEMA)){
+    const ws = wb.Sheets[sheet];
+    data[sheet] = ws ? XLSX.utils.sheet_to_json(ws,{defval:''}) : [];
+  }
+  if(!data.Funds||!data.Funds.length) data.Funds = SEED_FUNDS.map(f=>({...f}));
+  for(const sf of SEED_FUNDS){ if(!data.Funds.some(f=>f.FundID===sf.FundID)) data.Funds.push({...sf}); }
+  if(!data.Meta||!data.Meta.length) data.Meta = [{Key:'SchemaVersion',Value:SCHEMA_VERSION}];
+  state.data = data;
+  state.dirty = false;
+  state.savedAt = new Date();
+}
+
+async function saveToOneDrive(silent){
+  if(!state.account) return;
+  const wb = XLSX.utils.book_new();
   for(const[sheet,cols] of Object.entries(SCHEMA)){
-    const rows=(state.data[sheet]||[]).map(r=>{ const o={}; for(const c of cols) o[c]=r[c]??''; return o; });
-    const ws=XLSX.utils.json_to_sheet(rows,{header:cols});
+    const rows = (state.data[sheet]||[]).map(r=>{ const o={}; for(const c of cols) o[c]=r[c]??''; return o; });
+    const ws = XLSX.utils.json_to_sheet(rows,{header:cols});
     XLSX.utils.book_append_sheet(wb,ws,sheet);
   }
-  const out=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-  const w=await state.handle.createWritable();
-  await w.write(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  await w.close();
-  state.dirty=false;
-  state.savedAt=new Date();
+  const out = XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  await gFetch('/me/drive/root:/'+FILE_NAME+':/content',{
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    body: new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+  });
+  state.dirty = false;
+  state.savedAt = new Date();
   updateFileStatus();
   if(!silent) toast('OneDrive рүү хадгалагдлаа.','ok','Хадгалсан');
 }
 
+async function reloadFromOneDrive(){
+  if(!state.account) return;
+  try{
+    const resp = await gFetch('/me/drive/root:/'+FILE_NAME+':/content');
+    loadWorkbookBuffer(await resp.arrayBuffer());
+    render();
+    toast('OneDrive-аас дахин ачаалагдлаа.','ok');
+  }catch(e){
+    toast('Дахин ачааллахад алдаа: '+e.message,'err');
+  }
+}
+
 /** mutate + autosave helper */
 async function commit(fn, okMsg){
-  try{ fn(); state.dirty=true; updateFileStatus(); await saveWorkbook(true);
+  try{ fn(); state.dirty=true; updateFileStatus(); await saveToOneDrive(true);
     if(okMsg) toast(okMsg,'ok','Амжилттай'); render();
   }catch(e){ toast(e.message||'Алдаа гарлаа','err','Алдаа'); console.error(e); }
 }
 
-function gateError(msg){ $('#gateHint').textContent=msg; }
+function gateError(msg){ const h=$('#gateHint'); h.textContent=msg; h.style.color='var(--red)'; }
+function gateInfo(msg){ const h=$('#gateHint'); h.textContent=msg; h.style.color='var(--gam-blue)'; }
 
 /* ============================================================
    Computed: balances & fund stats
@@ -315,14 +367,25 @@ function enterApp(){
   $('#gate').classList.add('hidden');
   $('#app').classList.remove('hidden');
   updateFileStatus();
+  updateTopBarUser();
   render();
+}
+function updateTopBarUser(){
+  const info=$('#userInfo');
+  if(state.account){
+    $('#userName').textContent = state.account.name||state.account.username||'';
+    $('#userEmail').textContent = state.account.username||'';
+    info.classList.remove('hidden');
+  }else{
+    info.classList.add('hidden');
+  }
 }
 function updateFileStatus(){
   const dot=$('#connDot'), name=$('#fileName'), saved=$('#fileSaved');
-  if(!state.handle){ dot.className='dot dot-off'; name.textContent='Холбогдоогүй · Not connected'; saved.textContent=''; return; }
-  name.textContent=state.handle.name;
+  if(!state.account){ dot.className='dot dot-off'; name.textContent='Холбогдоогүй · Not connected'; saved.textContent=''; return; }
+  name.textContent=FILE_NAME;
   if(state.dirty){ dot.className='dot dot-dirty'; saved.textContent='Хадгалаагүй өөрчлөлт байна'; }
-  else{ dot.className='dot dot-on'; saved.textContent= state.savedAt? 'Сүүлд хадгалсан: '+state.savedAt.toLocaleString('en-GB') : 'Synced'; }
+  else{ dot.className='dot dot-on'; saved.textContent= state.savedAt? 'Хадгалсан: '+state.savedAt.toLocaleString('en-GB') : 'Synced'; }
 }
 
 /* ============================================================
@@ -1309,38 +1372,25 @@ function confirmModal(title,msg,onYes){
    Init
    ============================================================ */
 async function init(){
-  // gate buttons
-  $('#btnOpen').onclick=openWorkbook;
-  $('#btnCreate').onclick=createWorkbook;
-  $('#btnSave').onclick=()=>saveWorkbook(false);
-  $('#btnReload').onclick=async()=>{ if(state.handle){ await loadFromHandle(); render(); toast('Файлаас дахин ачаалагдлаа.','ok'); } };
+  $('#btnSignIn').onclick = signIn;
+  $('#btnSave').onclick   = ()=>saveToOneDrive(false);
+  $('#btnReload').onclick = reloadFromOneDrive;
+  $('#btnSignOut').onclick= signOut;
   $$('.nav-item').forEach(b=>b.onclick=()=>go(b.dataset.view));
 
-  // warn on unsaved close
   window.addEventListener('beforeunload',e=>{ if(state.dirty){ e.preventDefault(); e.returnValue=''; } });
 
-  if(!fsaSupported()){
-    gateError('Анхаар: энэ хөтөч File System Access API дэмжихгүй. Microsoft Edge эсвэл Google Chrome ашиглана уу.');
-  }
-
-  // try to reconnect last workbook
+  // restore session if a cached account exists
   try{
-    const handle=await IDB.get('workbookHandle');
-    if(handle){
-      const opts={mode:'readwrite'};
-      if((await handle.queryPermission(opts))==='granted'){
-        state.handle=handle; await loadFromHandle(); enterApp(); return;
-      }else{
-        // need a user gesture to re-grant
-        const reconnect=el('button',{class:'btn btn-outline btn-lg',onclick:async()=>{
-          if(await verifyPermission(handle,true)){ state.handle=handle; await loadFromHandle();
-            await IDB.set('workbookHandle',handle); enterApp(); }
-          else gateError('Эрх олгогдсонгүй.');
-        }},'🔄 Сүүлийн файл руу холбогдох',el('small',{},handle.name));
-        $('#gateHint').innerHTML='';
-        $('#gateHint').append(reconnect);
-      }
+    await msalApp.handleRedirectPromise();
+    const accounts = msalApp.getAllAccounts();
+    if(accounts.length){
+      msalApp.setActiveAccount(accounts[0]);
+      state.account = accounts[0];
+      updateTopBarUser();
+      gateInfo('OneDrive-аас файлыг хайж байна…');
+      await findOrCreateWorkbook();
     }
-  }catch(e){ /* ignore */ }
+  }catch(e){ console.warn('MSAL restore:', e); }
 }
 document.addEventListener('DOMContentLoaded',init);
