@@ -164,6 +164,8 @@ async function gFetch(path, opts={}){
 let _spSiteId = null;
 async function getSpSiteId(){
   if(_spSiteId) return _spSiteId;
+  console.log('[GAM] _SP_HOST value:', _SP_HOST);
+  console.log('[GAM] Full URL being called:', '/sites/'+_SP_HOST+':/');
   const resp = await gFetch('/sites/'+_SP_HOST+':/');
   const data = await resp.json();
   _spSiteId = data.id;
