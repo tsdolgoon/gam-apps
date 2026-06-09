@@ -23,6 +23,12 @@ const SCHEMA = {
   Bonds: ['BondID','IssuerMN','IssuerEN','FundID','BondType','FaceValue','CouponRate','CouponFreq',
           'IssueDate','MaturityDate','PurchasePrice','PurchaseDate','MarketPrice','MarketPriceDate',
           'Currency','YTM','AccruedInterest','MarketValue','UnrealizedPL','Status','Notes'],
+  Instruments: ['InsID','InsType','NameMN','NameEN','Issuer','ISIN','Currency','FundID','Status',
+          'PurchaseDate','PurchasePrice','Quantity','CurrentPrice','CurrentPriceDate',
+          'FaceValue','CouponRate','CouponFreq','IssueDate','MaturityDate','YTM','AccruedInterest',
+          'Exchange','Ticker','DividendYield','FundManager','FundUnitType',
+          'MarketValue','UnrealizedPL','GainPct','Notes'],
+  PriceHistory: ['PriceID','InsID','Date','Price','Source','Notes'],
   Fees: ['FeeID','CalcDate','FundID','Period','OpeningNAV','ClosingNAV','MgmtFeePct','MgmtFee',
          'TargetReturnPct','TargetGrowth','NavGrowth','ExcessGrowth','PerfFeePct','PerfFee','TotalFee','Status','Notes'],
   ECIFFirms: ['FirmID','JoinDate','NameMN','NameEN','RegNo','EmployeeCount','ContactPerson','Phone','Email',
@@ -105,7 +111,7 @@ function sumTxnType(type, investorId, fundId){
    ============================================================ */
 const state = {
   account: null,
-  data: { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[], ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] },
+  data: { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Instruments:[], PriceHistory:[], Fees:[], ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] },
   dirty: false,
   view: 'dashboard',
   savedAt: null,
@@ -116,6 +122,11 @@ const BOND_TYPES   = ['Засгийн газрын (Government)','Корпора
 const COUPON_FREQ  = ['Сар бүр (Monthly)','Улирал бүр (Quarterly)','Жилд нэг (Annually)'];
 const BOND_CCY     = ['MNT','USD','CNY','EUR','JPY'];
 const BOND_STATUS  = ['Идэвхтэй','Дууссан','Зарсан']; // Active / Matured / Sold
+
+/* ---------- Investment instrument registry reference data ---------- */
+const INS_TYPES    = ['Бонд (Bond)','Хувьцаа (Equity)','Сангийн нэгж (Fund Unit)','Мөнгөний зах зээл (Money Market)','Бусад (Other)'];
+const INS_STATUS   = ['Идэвхтэй (Active)','Дууссан (Matured)','Зарагдсан (Sold)'];
+const INS_EXCHANGES= ['МХБ (MSE)','NYSE','NASDAQ','HKEX','Бусад (Other)'];
 
 /* ============================================================
    Tiny helpers
@@ -222,7 +233,7 @@ async function signIn(){
 async function signOut(){
   try{ await msalApp.logoutRedirect({ account: msalApp.getActiveAccount() }); }catch{}
   state.account = null;
-  state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[],
+  state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Instruments:[], PriceHistory:[], Fees:[],
     ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] };
   state.dirty = false;
   state.savedAt = null;
@@ -250,7 +261,7 @@ async function createWorkbookOnSharePoint(){
   gateInfo(FILE_NAME+' файлыг SharePoint дээр үүсгэж байна…');
   state.data = {
     Funds: SEED_FUNDS.map(f=>({...f})),
-    Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[],
+    Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Instruments:[], PriceHistory:[], Fees:[],
     ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[],
     Meta:[{Key:'SchemaVersion',Value:SCHEMA_VERSION},
           {Key:'CreatedAt',Value:new Date().toISOString()},
@@ -309,7 +320,8 @@ async function ensureSpFolder(){
 
 async function saveToSharePoint(silent){
   if(!state.account) return;
-  refreshBondComputed(); // snapshot auto-computed bond metrics into the workbook
+  refreshBondComputed();       // snapshot auto-computed bond metrics into the workbook
+  refreshInstrumentComputed(); // snapshot auto-computed instrument metrics into the workbook
   const wb = XLSX.utils.book_new();
   for(const[sheet,cols] of Object.entries(SCHEMA)){
     const rows = (state.data[sheet]||[]).map(r=>{ const o={}; for(const c of cols) o[c]=r[c]??''; return o; });
@@ -517,6 +529,51 @@ function refreshBondComputed(){
     b.AccruedInterest = +bondAccruedInterest(b).toFixed(2);
     b.MarketValue     = +bondMarketValue(b).toFixed(2);
     b.UnrealizedPL    = +bondUnrealizedPL(b).toFixed(2);
+  }
+}
+
+/* ============================================================
+   Investment instruments — analytics (all auto-computed)
+   Prices are money-per-unit; quantity is the number held.
+   ============================================================ */
+function instrumentById(id){ return (state.data.Instruments||[]).find(x=>x.InsID===id); }
+function fundInstruments(fundId){ return (state.data.Instruments||[]).filter(x=>x.FundID===fundId); }
+function insIsBond(t){ return /бонд|bond/i.test(String(t)); }
+function insIsEquity(t){ return /хувьцаа|equity|stock/i.test(String(t)); }
+function insIsFundUnit(t){ return /сангийн нэгж|fund unit/i.test(String(t)); }
+function insIsMoneyMarket(t){ return /мөнгөн|money market/i.test(String(t)); }
+/** current price (money per unit); falls back to purchase price until a market price is entered */
+function insCurPrice(ins){ return num(ins.CurrentPrice)>0 ? num(ins.CurrentPrice) : num(ins.PurchasePrice); }
+/** Market value = current price × quantity */
+function insMarketValue(ins){ return insCurPrice(ins)*num(ins.Quantity); }
+/** Cost = purchase price × quantity */
+function insCostValue(ins){ return num(ins.PurchasePrice)*num(ins.Quantity); }
+/** Unrealized gain/loss = market value − cost */
+function insUnrealizedPL(ins){ return insMarketValue(ins)-insCostValue(ins); }
+/** Gain/loss % = (current − purchase) / purchase × 100 */
+function insGainPct(ins){ const p=num(ins.PurchasePrice); return p? (insCurPrice(ins)-p)/p*100 : 0; }
+/** shape an instrument-bond into the object the bond helpers expect (price as % of par) */
+function instrToBond(ins){
+  const face=num(ins.FaceValue);
+  const toQuote=v=> face>0 ? num(v)/face*100 : num(v); // money/unit → % of par
+  return {FaceValue:face, CouponRate:ins.CouponRate, CouponFreq:ins.CouponFreq,
+    IssueDate:ins.IssueDate, MaturityDate:ins.MaturityDate,
+    PurchasePrice:toQuote(ins.PurchasePrice), MarketPrice:toQuote(insCurPrice(ins)),
+    MarketPriceDate:ins.CurrentPriceDate};
+}
+/** YTM (annual %) for an instrument-bond, 0 for non-bonds */
+function insYTM(ins){ return insIsBond(ins.InsType)? bondYTM(instrToBond(ins)) : 0; }
+/** total accrued interest across the holding (per-bond accrual × quantity) */
+function insAccrued(ins){ return insIsBond(ins.InsType)? bondAccruedInterest(instrToBond(ins))*(num(ins.Quantity)||1) : 0; }
+
+/** snapshot the computed metrics onto each instrument record (called before save) */
+function refreshInstrumentComputed(){
+  for(const ins of state.data.Instruments||[]){
+    ins.MarketValue  = +insMarketValue(ins).toFixed(2);
+    ins.UnrealizedPL = +insUnrealizedPL(ins).toFixed(2);
+    ins.GainPct      = +insGainPct(ins).toFixed(4);
+    ins.YTM          = +insYTM(ins).toFixed(4);
+    ins.AccruedInterest = +insAccrued(ins).toFixed(2);
   }
 }
 
@@ -1583,6 +1640,332 @@ function bondDetail(id){
     ' · Дуусахад эргэн төлөгдөх үндсэн төлбөр · principal at maturity: ',el('strong',{},ccySym(ccy)+fmtMoney(num(b.FaceValue),2))));
 
   modal('Бондын дэлгэрэнгүй · Bond detail', body, {okText:'Хаах', cancel:false, wide:true});
+}
+
+/* ============================================================
+   VIEW: Investment Instruments — master registry of every
+   financial instrument the GAM funds invest in.
+   ============================================================ */
+const INS_BUCKETS = ['Бонд','Хувьцаа','Сангийн нэгж','Мөнгөний ЗЗ','Бусад'];
+function insBucket(t){
+  if(insIsBond(t))       return 'Бонд';
+  if(insIsEquity(t))     return 'Хувьцаа';
+  if(insIsFundUnit(t))   return 'Сангийн нэгж';
+  if(insIsMoneyMarket(t))return 'Мөнгөний ЗЗ';
+  return 'Бусад';
+}
+
+VIEWS.instruments=function(){
+  const wrap=el('div',{});
+  wrap.append(viewHead('Хөрөнгө оруулалтын хэрэгсэл','Investment Instruments — master registry',
+    el('button',{class:'btn btn-primary',onclick:()=>instrumentForm()},'＋ Шинэ хэрэгсэл · New instrument')));
+
+  wrap.append(el('div',{class:'panel'},el('div',{class:'panel-body'},
+    el('p',{class:'muted small',style:'margin:0'},
+      'Бүх санхүүгийн хэрэгслийг энд бүртгэж, санд хуваарилна. ',
+      el('strong',{},'Зах зээлийн үнэлгээ, ашиг/алдагдал, жин (%)'),
+      ' автоматаар тооцоологдоно. Бондын YTM ба хуримтлагдсан хүү автомат. Огнооны формат: YYYY-MM-DD.'))));
+
+  const all=state.data.Instruments||[];
+
+  // ---- portfolio KPIs ----
+  const totMV=all.reduce((s,x)=>s+insMarketValue(x),0);
+  const totCost=all.reduce((s,x)=>s+insCostValue(x),0);
+  const plPct= totCost? (totMV-totCost)/totCost*100 : 0;
+  wrap.append(el('div',{class:'cards'},
+    kpi('Нийт хэрэгсэл · Instruments', fmtInt(all.length), ''),
+    kpi('Зах зээлийн үнэлгээ', '₮'+fmtMoney(totMV,0), 'өртөг ₮'+fmtMoney(totCost,0)),
+    kpi('Боломжит ашиг/алдагдал', (totMV-totCost<0?'−₮':'₮')+fmtMoney(Math.abs(totMV-totCost),0), plPct.toFixed(2)+'%'),
+    kpi('Төрлийн тоо · Types', fmtInt(new Set(all.map(x=>insBucket(x.InsType))).size), 'instrument classes')));
+
+  // ---- per-fund summary, broken down by instrument type ----
+  const fundIds=[...new Set(all.map(x=>x.FundID||''))];
+  if(fundIds.length){
+    const sp=el('div',{class:'panel'});
+    sp.append(el('div',{class:'panel-head'},el('h3',{},'Сан тус бүрийн дүн (төрлөөр) · Per-fund value by type')));
+    const st=el('table',{class:'grid'});
+    st.innerHTML=`<thead><tr><th>Сан</th>${INS_BUCKETS.map(b=>`<th class="num">${b}</th>`).join('')}<th class="num">Нийт · Total</th></tr></thead>`;
+    const stb=el('tbody');
+    for(const fid of fundIds){
+      const list=all.filter(x=>(x.FundID||'')===fid);
+      const cells=INS_BUCKETS.map(b=>{
+        const v=list.filter(x=>insBucket(x.InsType)===b).reduce((s,x)=>s+insMarketValue(x),0);
+        return el('td',{class:'num'}, v? '₮'+fmtMoney(v,0) : el('span',{class:'muted'},'—'));
+      });
+      const tot=list.reduce((s,x)=>s+insMarketValue(x),0);
+      stb.append(el('tr',{},
+        el('td',{}, fid? fundChip(fid) : el('span',{class:'muted'},'Хуваарилаагүй · Unassigned')),
+        ...cells, el('td',{class:'num'},el('strong',{},'₮'+fmtMoney(tot,0)))));
+    }
+    st.append(stb); sp.append(el('div',{class:'table-wrap'},st)); wrap.append(sp);
+  }
+
+  // ---- filters + list ----
+  let fType='',fFund='',fStatus='',fSearch='';
+  const typeSel=el('select',{onchange:e=>{fType=e.target.value;draw();}});
+  ['',...INS_TYPES].forEach(t=>typeSel.append(el('option',{value:t},t||'Бүх төрөл')));
+  const fundSel=el('select',{onchange:e=>{fFund=e.target.value;draw();}});
+  fundSel.append(el('option',{value:''},'Бүх сан'));
+  investableFunds().forEach(f=>fundSel.append(el('option',{value:f.FundID},f.ShortName)));
+  const statusSel=el('select',{onchange:e=>{fStatus=e.target.value;draw();}});
+  ['',...INS_STATUS].forEach(s=>statusSel.append(el('option',{value:s},s||'Бүх төлөв')));
+  const searchIn=el('input',{type:'text',placeholder:'Нэр, гаргагч, ISIN, тикэрээр хайх…',
+    oninput:e=>{fSearch=e.target.value.toLowerCase().trim();draw();}});
+  wrap.append(el('div',{class:'toolbar'},typeSel,fundSel,statusSel,el('div',{class:'search',style:'margin-left:auto'},searchIn)));
+
+  const panel=el('div',{class:'panel'});
+  const host=el('div',{class:'table-wrap'});
+  panel.append(host); wrap.append(panel);
+
+  function draw(){
+    let list=[...all];
+    if(fType)   list=list.filter(x=>x.InsType===fType);
+    if(fFund)   list=list.filter(x=>x.FundID===fFund);
+    if(fStatus) list=list.filter(x=>x.Status===fStatus);
+    if(fSearch) list=list.filter(x=>`${x.InsID} ${x.NameMN} ${x.NameEN} ${x.Issuer} ${x.ISIN} ${x.Ticker}`.toLowerCase().includes(fSearch));
+    list.sort((a,b)=>String(a.InsID).localeCompare(String(b.InsID)));
+    const t=el('table',{class:'grid'});
+    t.innerHTML=`<thead><tr><th>ID</th><th>Төрөл</th><th>Нэр · Name</th><th>Гаргагч</th><th>Сан</th>
+      <th class="num">Авсан үнэ</th><th class="num">Одоогийн үнэ</th><th class="num">Ашиг/Алдагдал %</th><th>Төлөв</th><th></th></tr></thead>`;
+    const tb=el('tbody');
+    if(!list.length) tb.append(emptyRow(10, all.length?'Шүүлтэд тохирох хэрэгсэл алга.':'Хэрэгсэл бүртгэгдээгүй. «Шинэ хэрэгсэл» дарж эхэлнэ үү.'));
+    for(const x of list){
+      const ccy=x.Currency, g=insGainPct(x);
+      tb.append(el('tr',{},
+        el('td',{},x.InsID),
+        el('td',{},el('span',{class:'small'},beforeParen(x.InsType))),
+        el('td',{},el('div',{},el('strong',{},x.NameMN||''), x.NameEN?el('div',{class:'small muted'},x.NameEN):null)),
+        el('td',{},x.Issuer||''),
+        el('td',{}, x.FundID? fundChip(x.FundID) : el('span',{class:'muted'},'—')),
+        el('td',{class:'num'},ccySym(ccy)+fmtMoney(x.PurchasePrice,2)),
+        el('td',{class:'num'},ccySym(ccy)+fmtMoney(insCurPrice(x),2)),
+        el('td',{class:'num'},el('span',{style:'color:'+(g<0?'var(--red)':g>0?'var(--green)':'var(--muted)')+';font-weight:600'},(g<0?'−':'')+Math.abs(g).toFixed(2)+'%')),
+        el('td',{},statusBadge(beforeParen(x.Status))),
+        el('td',{},el('div',{class:'row-actions'},
+          el('button',{class:'btn btn-ghost btn-sm',onclick:()=>instrumentDetail(x.InsID)},'Дэлгэрэнгүй'),
+          el('button',{class:'btn btn-ghost btn-sm',onclick:()=>instrumentForm(x)},'Засах')))));
+    }
+    t.append(tb); host.innerHTML=''; host.append(t);
+  }
+  draw();
+  return wrap;
+};
+
+function instrumentForm(existing){
+  const isEdit=!!existing;
+  const x=existing||{InsID:nextId('INS',state.data.Instruments,'InsID'),InsType:INS_TYPES[0],
+    Currency:'MNT',Status:INS_STATUS[0],PurchaseDate:todayISO()};
+
+  const typeSel=optSelect('InsType',INS_TYPES,x.InsType);
+  const statusSel=optSelect('Status',INS_STATUS,x.Status||INS_STATUS[0]);
+  const nameMN=el('input',{type:'text',value:x.NameMN||''});
+  const nameEN=el('input',{type:'text',value:x.NameEN||''});
+  const issuer=el('input',{type:'text',value:x.Issuer||''});
+  const isin=el('input',{type:'text',value:x.ISIN||''});
+  const ccySel=optSelect('Currency',BOND_CCY,x.Currency||'MNT');
+  const fundSel=selectEl('FundID',investableFunds().map(f=>({v:f.FundID,t:`${f.ShortName} (${f.FundID})`}))); fundSel.value=x.FundID||'';
+  const purchDate=el('input',{type:'date',value:x.PurchaseDate||''});
+  const purchPrice=el('input',{type:'number',step:'0.0001',min:'0',value:x.PurchasePrice??''});
+  const qty=el('input',{type:'number',step:'0.0001',min:'0',value:x.Quantity??''});
+  const curPrice=el('input',{type:'number',step:'0.0001',min:'0',value:x.CurrentPrice??'',placeholder:'гараар шинэчилнэ'});
+  const curDate=el('input',{type:'date',value:x.CurrentPriceDate||''});
+  const noteIn=el('input',{type:'text',value:x.Notes||''});
+  // bond
+  const faceIn=el('input',{type:'number',step:'0.01',min:'0',value:x.FaceValue??''});
+  const rateIn=el('input',{type:'number',step:'0.001',min:'0',value:x.CouponRate??''});
+  const freqSel=optSelect('CouponFreq',COUPON_FREQ,x.CouponFreq||COUPON_FREQ[1]);
+  const issueIn=el('input',{type:'date',value:x.IssueDate||''});
+  const matIn=el('input',{type:'date',value:x.MaturityDate||''});
+  // equity
+  const exchSel=optSelect('Exchange',INS_EXCHANGES,x.Exchange||INS_EXCHANGES[0]);
+  const tickerIn=el('input',{type:'text',value:x.Ticker||''});
+  const divIn=el('input',{type:'number',step:'0.01',min:'0',value:x.DividendYield??''});
+  // fund unit
+  const fmgrIn=el('input',{type:'text',value:x.FundManager||''});
+  const futypeIn=el('input',{type:'text',value:x.FundUnitType||''});
+
+  const calc=el('div',{class:'calc-box'});
+
+  // wrap type-specific fields so we can show/hide them as a group
+  const bondFields=[
+    wrapField('Нэрлэсэн үнэ','Face value',faceIn),
+    wrapField('Купон хүү %','Coupon rate %',rateIn),
+    wrapField('Купон давтамж','Coupon frequency',freqSel),
+    wrapField('Гаргасан огноо','Issue date',issueIn),
+    wrapField('Дуусах огноо','Maturity date',matIn)];
+  const equityFields=[
+    wrapField('Бирж','Stock exchange',exchSel),
+    wrapField('Тикэр','Ticker symbol',tickerIn),
+    wrapField('Ногдол ашгийн өгөөж %','Dividend yield %',divIn)];
+  const fundUnitFields=[
+    wrapField('Сангийн менежер','Fund manager',fmgrIn),
+    wrapField('Сангийн төрөл','Fund type',futypeIn)];
+
+  function readIns(){ return {InsType:typeSel.value,FaceValue:faceIn.value,CouponRate:rateIn.value,
+    CouponFreq:freqSel.value,IssueDate:issueIn.value,MaturityDate:matIn.value,
+    PurchasePrice:purchPrice.value,Quantity:qty.value,CurrentPrice:curPrice.value,CurrentPriceDate:curDate.value}; }
+  function recalc(){
+    const t=readIns(), ccy=ccySel.value;
+    const rows=[
+      crow('Зах зээлийн үнэлгээ · Market value', ccySym(ccy)+fmtMoney(insMarketValue(t),2)),
+      crow('Өртөг · Cost', ccySym(ccy)+fmtMoney(insCostValue(t),2)),
+      crow('Ашиг/Алдагдал % · Gain/Loss %', insGainPct(t).toFixed(2)+'%')];
+    if(insIsBond(t.InsType)) rows.push(
+      crow('YTM (жилийн)', insYTM(t).toFixed(3)+'%'),
+      crow('Хуримтлагдсан хүү · Accrued', ccySym(ccy)+fmtMoney(insAccrued(t),2)));
+    rows.push(crow('Боломжит ашиг/алдагдал · Unrealized P/L',
+      (insUnrealizedPL(t)<0?'−':'')+ccySym(ccy)+fmtMoney(Math.abs(insUnrealizedPL(t)),2), true));
+    calc.innerHTML=''; calc.append(...rows);
+  }
+  function syncType(){
+    const t=typeSel.value;
+    bondFields.forEach(f=>f.style.display=insIsBond(t)?'':'none');
+    equityFields.forEach(f=>f.style.display=insIsEquity(t)?'':'none');
+    fundUnitFields.forEach(f=>f.style.display=insIsFundUnit(t)?'':'none');
+    recalc();
+  }
+  typeSel.addEventListener('change',syncType);
+  [purchPrice,qty,curPrice,faceIn,rateIn].forEach(i=>i.addEventListener('input',recalc));
+  [freqSel,issueIn,matIn,curDate,ccySel].forEach(i=>i.addEventListener('change',recalc));
+
+  const body=el('div',{},
+    el('div',{class:'form-grid'},
+      wrapField('Хэрэгслийн төрөл','Instrument type',typeSel,true),
+      wrapField('Төлөв','Status',statusSel),
+      wrapField('Нэр (Монгол)','Name (MN)',nameMN,true),
+      wrapField('Нэр (English)','Name (EN)',nameEN),
+      wrapField('Гаргагч / Компани','Issuer / Company',issuer),
+      wrapField('Бүртгэл / ISIN','Registration / ISIN',isin),
+      wrapField('Валют','Currency',ccySel),
+      wrapField('Сан','Fund assignment',fundSel),
+      wrapField('Худалдан авсан огноо','Purchase date',purchDate),
+      wrapField('Худалдан авсан үнэ','Purchase price',purchPrice,true),
+      wrapField('Тоо ширхэг / нэгж','Quantity / units',qty,true),
+      wrapField('Одоогийн үнэ','Current price',curPrice),
+      wrapField('Одоогийн үнийн огноо','Current price date',curDate),
+      ...bondFields, ...equityFields, ...fundUnitFields,
+      wrapField('Тэмдэглэл','Notes',noteIn),
+    ),
+    el('div',{class:'small muted',style:'margin:6px 2px'},'Доорх үзүүлэлтүүд автоматаар тооцоологдоно · auto-computed:'),
+    calc);
+  syncType();
+
+  modal(isEdit?'Хэрэгсэл засах':'Шинэ хэрэгсэл', body, {okText:isEdit?'Хадгалах':'Бүртгэх', wide:true, onOk:()=>{
+    if(!nameMN.value.trim()){ toast('Нэр заавал бөглөнө.','err'); return false; }
+    if(num(purchPrice.value)<=0){ toast('Худалдан авсан үнэ оруулна уу.','err'); return false; }
+    if(num(qty.value)<=0){ toast('Тоо ширхэг оруулна уу.','err'); return false; }
+    const rec={
+      InsID:x.InsID, InsType:typeSel.value, NameMN:nameMN.value.trim(), NameEN:nameEN.value.trim(),
+      Issuer:issuer.value.trim(), ISIN:isin.value.trim(), Currency:ccySel.value, FundID:fundSel.value,
+      Status:statusSel.value, PurchaseDate:purchDate.value, PurchasePrice:num(purchPrice.value),
+      Quantity:num(qty.value), CurrentPrice:num(curPrice.value), CurrentPriceDate:curDate.value,
+      FaceValue:num(faceIn.value), CouponRate:num(rateIn.value), CouponFreq:freqSel.value,
+      IssueDate:issueIn.value, MaturityDate:matIn.value, Exchange:exchSel.value, Ticker:tickerIn.value.trim(),
+      DividendYield:num(divIn.value), FundManager:fmgrIn.value.trim(), FundUnitType:futypeIn.value.trim(),
+      Notes:noteIn.value,
+    };
+    rec.MarketValue=+insMarketValue(rec).toFixed(2); rec.UnrealizedPL=+insUnrealizedPL(rec).toFixed(2);
+    rec.GainPct=+insGainPct(rec).toFixed(4); rec.YTM=+insYTM(rec).toFixed(4); rec.AccruedInterest=+insAccrued(rec).toFixed(2);
+    commit(()=>{ if(isEdit) Object.assign(existing,rec); else state.data.Instruments.push(rec); },
+      isEdit?'Хэрэгсэл шинэчлэгдлээ':'Хэрэгсэл бүртгэгдлээ ('+rec.InsID+')');
+  }});
+}
+
+function instrumentDetail(id){
+  const x=instrumentById(id); if(!x)return;
+  const ccy=x.Currency;
+  const body=el('div',{});
+  body.append(el('h3',{style:'margin:0 0 2px;color:var(--gam-navy)'},x.NameMN||''),
+    el('div',{class:'muted small',style:'margin-bottom:12px'},
+      (x.NameEN||'')+' · '+x.InsID+' · '+beforeParen(x.InsType)));
+
+  // metric cards
+  const mv=insMarketValue(x), pl=insUnrealizedPL(x);
+  const fundList=x.FundID?fundInstruments(x.FundID):[];
+  const fundTotal=fundList.reduce((s,i)=>s+insMarketValue(i),0);
+  const weight= fundTotal? mv/fundTotal*100 : 0;
+  body.append(el('div',{class:'cards',style:'margin-bottom:6px'},
+    kpi('Зах зээлийн үнэлгээ',ccySym(ccy)+fmtMoney(mv,0),''),
+    kpi('Ашиг/Алдагдал %',insGainPct(x).toFixed(2)+'%',(pl<0?'−':'')+ccySym(ccy)+fmtMoney(Math.abs(pl),0)),
+    kpi('Сангийн жин · Weight', x.FundID?weight.toFixed(2)+'%':'—', x.FundID?(fundById(x.FundID)||{}).ShortName||'':'хуваарилаагүй'),
+    insIsBond(x.InsType)?kpi('YTM',insYTM(x).toFixed(3)+'%','хуримтлагдсан '+ccySym(ccy)+fmtMoney(insAccrued(x),0))
+      :kpi('Тоо ширхэг · Quantity',fmtUnits(x.Quantity),'')));
+
+  // facts
+  const two=el('div',{class:'panel-body two-col',style:'padding:0'});
+  const dl1=el('dl',{class:'def-list'}), dl2=el('dl',{class:'def-list'});
+  const add=(dl,k,v)=>{dl.append(el('dt',{},k),el('dd',{},(v===''||v==null)?'—':v));};
+  add(dl1,'Төрөл · Type', beforeParen(x.InsType));
+  add(dl1,'Гаргагч · Issuer', x.Issuer);
+  add(dl1,'Бүртгэл / ISIN', x.ISIN);
+  add(dl1,'Валют · Currency', x.Currency||'MNT');
+  add(dl1,'Сан · Fund', x.FundID?((fundById(x.FundID)||{}).ShortName||x.FundID):'Хуваарилаагүй');
+  add(dl1,'Төлөв · Status', beforeParen(x.Status));
+  add(dl2,'Худалдан авсан · Purchased', fmtDate(x.PurchaseDate)+' @ '+ccySym(ccy)+fmtMoney(x.PurchasePrice,4));
+  add(dl2,'Тоо ширхэг · Quantity', fmtUnits(x.Quantity));
+  add(dl2,'Одоогийн үнэ · Current price', ccySym(ccy)+fmtMoney(insCurPrice(x),4)+(x.CurrentPriceDate?'  ('+fmtDate(x.CurrentPriceDate)+')':''));
+  add(dl2,'Өртөг · Cost', ccySym(ccy)+fmtMoney(insCostValue(x),2));
+  add(dl2,'Зах зээлийн үнэлгээ · Market value', ccySym(ccy)+fmtMoney(mv,2));
+  // type-specific facts
+  if(insIsBond(x.InsType)){
+    add(dl2,'Нэрлэсэн үнэ · Face', ccySym(ccy)+fmtMoney(x.FaceValue,2));
+    add(dl2,'Купон · Coupon', num(x.CouponRate).toFixed(3)+'% · '+beforeParen(x.CouponFreq));
+    add(dl2,'Гаргасан/Дуусах · Issue/Maturity', fmtDate(x.IssueDate)+' → '+fmtDate(x.MaturityDate));
+  } else if(insIsEquity(x.InsType)){
+    add(dl2,'Бирж / Тикэр · Exchange / Ticker', beforeParen(x.Exchange)+(x.Ticker?' · '+x.Ticker:''));
+    add(dl2,'Ногдол ашгийн өгөөж · Dividend yield', num(x.DividendYield).toFixed(2)+'%');
+  } else if(insIsFundUnit(x.InsType)){
+    add(dl2,'Сангийн менежер · Manager', x.FundManager);
+    add(dl2,'Сангийн төрөл · Fund type', x.FundUnitType);
+  }
+  if(x.Notes) add(dl1,'Тэмдэглэл · Notes', x.Notes);
+  two.append(dl1,dl2); body.append(two);
+
+  // price history
+  body.append(el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px'},
+    el('h4',{style:'margin:0;color:var(--gam-navy)'},'Үнийн түүх · Price history'),
+    el('button',{class:'btn btn-outline btn-sm',onclick:()=>pricePointForm(x.InsID)},'＋ Үнэ нэмэх')));
+  const hist=(state.data.PriceHistory||[]).filter(p=>p.InsID===x.InsID)
+    .sort((a,b)=>String(b.Date).localeCompare(String(a.Date)));
+  const t=el('table',{class:'grid'});
+  t.innerHTML=`<thead><tr><th>Огноо · Date</th><th class="num">Үнэ · Price</th><th>Эх сурвалж · Source</th><th>Тэмдэглэл</th></tr></thead>`;
+  const tb=el('tbody');
+  if(!hist.length) tb.append(emptyRow(4,'Үнийн бүртгэл алга. «Үнэ нэмэх» дарж оруулна уу.'));
+  for(const p of hist) tb.append(el('tr',{},
+    el('td',{},fmtDate(p.Date)), el('td',{class:'num'},ccySym(ccy)+fmtMoney(p.Price,4)),
+    el('td',{},p.Source||''), el('td',{},p.Notes||'')));
+  t.append(tb); body.append(el('div',{class:'table-wrap'},t));
+
+  modal('Хэрэгслийн дэлгэрэнгүй · Instrument detail', body, {okText:'Хаах', cancel:false, wide:true});
+}
+
+function pricePointForm(insId){
+  const x=instrumentById(insId); if(!x)return;
+  const dateIn=el('input',{type:'date',value:todayISO()});
+  const priceIn=el('input',{type:'number',step:'0.0001',min:'0',value:insCurPrice(x)||''});
+  const srcIn=el('input',{type:'text',value:'Гараар · Manual'});
+  const noteIn=el('input',{type:'text'});
+  const body=el('div',{},
+    el('div',{class:'small muted',style:'margin-bottom:8px'},'Хэрэгсэл: ',el('strong',{},x.NameMN||x.InsID)),
+    el('div',{class:'form-grid'},
+      wrapField('Огноо','Date',dateIn,true),
+      wrapField('Үнэ','Price',priceIn,true),
+      wrapField('Эх сурвалж','Source',srcIn),
+      wrapField('Тэмдэглэл','Notes',noteIn)),
+    el('div',{class:'small muted',style:'margin-top:6px'},'Хамгийн сүүлийн огнооны үнэ нь «одоогийн үнэ» болж шинэчлэгдэнэ.'));
+  modal('Үнэ нэмэх · Add price', body, {okText:'Нэмэх', onOk:()=>{
+    if(!dateIn.value){ toast('Огноо оруулна уу.','err'); return false; }
+    if(num(priceIn.value)<=0){ toast('Үнэ оруулна уу.','err'); return false; }
+    commit(()=>{
+      state.data.PriceHistory.push({PriceID:nextId('PRC',state.data.PriceHistory,'PriceID'),
+        InsID:x.InsID, Date:dateIn.value, Price:num(priceIn.value), Source:srcIn.value, Notes:noteIn.value});
+      // newest-dated price becomes the current price
+      if(!x.CurrentPriceDate || dateIn.value>=x.CurrentPriceDate){
+        x.CurrentPrice=num(priceIn.value); x.CurrentPriceDate=dateIn.value;
+      }
+    },'Үнэ нэмэгдлээ');
+    instrumentDetail(x.InsID); return false;
+  }});
 }
 
 /* ============================================================
