@@ -20,6 +20,9 @@ const SCHEMA = {
   Transactions: ['TxnID','TradeDate','Type','FundID','InvestorID','Units','UnitPrice','GrossAmount',
                  'FeePct','FeeAmount','NetAmount','SettlementDate','Status','PaymentRef','Notes','CreatedAt'],
   NAVHistory: ['NavID','Date','FundID','TotalNAV','UnitsOutstanding','UnitPrice','Source','Notes'],
+  Bonds: ['BondID','IssuerMN','IssuerEN','FundID','BondType','FaceValue','CouponRate','CouponFreq',
+          'IssueDate','MaturityDate','PurchasePrice','PurchaseDate','MarketPrice','MarketPriceDate',
+          'Currency','YTM','AccruedInterest','MarketValue','UnrealizedPL','Status','Notes'],
   Fees: ['FeeID','CalcDate','FundID','Period','OpeningNAV','ClosingNAV','MgmtFeePct','MgmtFee',
          'TargetReturnPct','TargetGrowth','NavGrowth','ExcessGrowth','PerfFeePct','PerfFee','TotalFee','Status','Notes'],
   ECIFFirms: ['FirmID','JoinDate','NameMN','NameEN','RegNo','EmployeeCount','ContactPerson','Phone','Email',
@@ -102,11 +105,17 @@ function sumTxnType(type, investorId, fundId){
    ============================================================ */
 const state = {
   account: null,
-  data: { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Fees:[], ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] },
+  data: { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[], ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] },
   dirty: false,
   view: 'dashboard',
   savedAt: null,
 };
+
+/* ---------- Bond reference data ---------- */
+const BOND_TYPES   = ['Засгийн газрын (Government)','Корпорацийн (Corporate)','Банкны (Bank)'];
+const COUPON_FREQ  = ['Сар бүр (Monthly)','Улирал бүр (Quarterly)','Жилд нэг (Annually)'];
+const BOND_CCY     = ['MNT','USD','CNY','EUR','JPY'];
+const BOND_STATUS  = ['Идэвхтэй','Дууссан','Зарсан']; // Active / Matured / Sold
 
 /* ============================================================
    Tiny helpers
@@ -213,7 +222,7 @@ async function signIn(){
 async function signOut(){
   try{ await msalApp.logoutRedirect({ account: msalApp.getActiveAccount() }); }catch{}
   state.account = null;
-  state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Fees:[],
+  state.data = { Funds:[], Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[],
     ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[], Meta:[] };
   state.dirty = false;
   state.savedAt = null;
@@ -241,7 +250,7 @@ async function createWorkbookOnSharePoint(){
   gateInfo(FILE_NAME+' файлыг SharePoint дээр үүсгэж байна…');
   state.data = {
     Funds: SEED_FUNDS.map(f=>({...f})),
-    Investors:[], Transactions:[], NAVHistory:[], Fees:[],
+    Investors:[], Transactions:[], NAVHistory:[], Bonds:[], Fees:[],
     ECIFFirms:[], ECIFEmployees:[], ECIFContributions:[],
     Meta:[{Key:'SchemaVersion',Value:SCHEMA_VERSION},
           {Key:'CreatedAt',Value:new Date().toISOString()},
@@ -300,6 +309,7 @@ async function ensureSpFolder(){
 
 async function saveToSharePoint(silent){
   if(!state.account) return;
+  refreshBondComputed(); // snapshot auto-computed bond metrics into the workbook
   const wb = XLSX.utils.book_new();
   for(const[sheet,cols] of Object.entries(SCHEMA)){
     const rows = (state.data[sheet]||[]).map(r=>{ const o={}; for(const c of cols) o[c]=r[c]??''; return o; });
@@ -418,6 +428,90 @@ function ecifValue(units){ return units*latestUnitPrice(ECIF_TARGET_FUND); }
 function ecifTotalUnits(){ return state.data.ECIFContributions.reduce((s,c)=>s+num(c.Units),0); }
 function ecifTotalAUM(){ return ecifValue(ecifTotalUnits()); }
 function ecifActiveEmployees(){ return state.data.ECIFEmployees.filter(e=>e.Status!=='Гарсан').length; }
+
+/* ============================================================
+   Bonds — analytics (all auto-computed, never entered by hand)
+   Bond prices are quoted as a % of par (face value).
+   ============================================================ */
+function bondById(id){ return (state.data.Bonds||[]).find(b=>b.BondID===id); }
+function fundBonds(fundId){ return (state.data.Bonds||[]).filter(b=>b.FundID===fundId); }
+/** coupon payments per year from the frequency label */
+function couponFreqPerYear(s){
+  s=String(s||'').toLowerCase();
+  if(s.includes('сар')||s.includes('month'))   return 12;
+  if(s.includes('улирал')||s.includes('quart')) return 4;
+  return 1; // annually
+}
+function monthsPerPeriod(s){ return Math.round(12/couponFreqPerYear(s)); }
+/** add whole months to an ISO date, returning YYYY-MM-DD */
+function addMonths(iso,m){ const d=new Date(iso); if(isNaN(d))return iso;
+  d.setMonth(d.getMonth()+m); return d.toISOString().slice(0,10); }
+function daysBetween(a,b){ const d=(new Date(b)-new Date(a))/864e5; return isFinite(d)?Math.round(d):0; }
+
+/** market quote (% of par); falls back to purchase price when no market price yet */
+function bondQuote(b){ return num(b.MarketPrice)>0 ? num(b.MarketPrice) : num(b.PurchasePrice); }
+/** Market value = quote × face / 100 */
+function bondMarketValue(b){ return bondQuote(b)*num(b.FaceValue)/100; }
+/** Cost = purchase price × face / 100 */
+function bondCostValue(b){ return num(b.PurchasePrice)*num(b.FaceValue)/100; }
+/** Unrealized gain/loss = market value − cost */
+function bondUnrealizedPL(b){ return bondMarketValue(b)-bondCostValue(b); }
+/** coupon amount paid each period */
+function bondPeriodCoupon(b){ const f=couponFreqPerYear(b.CouponFreq); return f? (num(b.CouponRate)/100)*num(b.FaceValue)/f : 0; }
+
+/** all coupon payment dates from first coupon after issue through maturity (inclusive) */
+function bondCouponDates(b){
+  const mpp=monthsPerPeriod(b.CouponFreq);
+  if(!b.IssueDate||!b.MaturityDate||!mpp) return [];
+  const out=[]; let d=addMonths(b.IssueDate,mpp), guard=0;
+  while(d<b.MaturityDate && guard<4000){ out.push(d); d=addMonths(d,mpp); guard++; }
+  out.push(b.MaturityDate);
+  return out;
+}
+
+/** Accrued interest = period coupon × (days since last coupon ÷ days in coupon period) */
+function bondAccruedInterest(b){
+  const f=couponFreqPerYear(b.CouponFreq), mpp=monthsPerPeriod(b.CouponFreq);
+  if(!f||!mpp||!b.IssueDate||!num(b.FaceValue)) return 0;
+  const asOf=b.MarketPriceDate||todayISO();
+  if(asOf<=b.IssueDate) return 0;
+  if(b.MaturityDate && asOf>=b.MaturityDate) return 0; // redeemed
+  let last=b.IssueDate, next=addMonths(b.IssueDate,mpp), guard=0;
+  while(next<=asOf && guard<4000){ last=next; next=addMonths(next,mpp); guard++; }
+  const daysInPeriod=daysBetween(last,next)||1;
+  const daysSince=Math.max(0,daysBetween(last,asOf));
+  return bondPeriodCoupon(b)*(daysSince/daysInPeriod);
+}
+
+/** Yield to maturity (annual %), solved from the current market quote by bisection */
+function bondYTM(b){
+  const face=num(b.FaceValue), f=couponFreqPerYear(b.CouponFreq), quote=bondQuote(b);
+  if(!face||!f||quote<=0||!b.MaturityDate) return 0;
+  const asOf=b.MarketPriceDate||todayISO();
+  const years=daysBetween(asOf,b.MaturityDate)/365.25;
+  if(years<=0) return 0;
+  const n=Math.max(1,Math.round(years*f));     // remaining coupon periods
+  const price=quote/100*face;                   // present value (clean)
+  const c=bondPeriodCoupon(b);                   // coupon per period
+  const pv=i=>{ let s=0; for(let k=1;k<=n;k++) s+=c/Math.pow(1+i,k); return s+face/Math.pow(1+i,n)-price; };
+  let lo=-0.9999, hi=1, flo=pv(lo), fhi=pv(hi), guard=0;
+  while(flo*fhi>0 && hi<1000){ hi*=2; fhi=pv(hi); if(++guard>60) break; }
+  if(flo*fhi>0) return 0;                         // no sign change → cannot solve
+  for(let k=0;k<200;k++){ const mid=(lo+hi)/2, fm=pv(mid);
+    if(Math.abs(fm)<1e-7){ lo=hi=mid; break; }
+    if(flo*fm<0){ hi=mid; fhi=fm; } else { lo=mid; flo=fm; } }
+  return ((lo+hi)/2)*f*100;
+}
+
+/** snapshot the computed metrics onto each bond record (called before save) */
+function refreshBondComputed(){
+  for(const b of state.data.Bonds||[]){
+    b.YTM             = +bondYTM(b).toFixed(4);
+    b.AccruedInterest = +bondAccruedInterest(b).toFixed(2);
+    b.MarketValue     = +bondMarketValue(b).toFixed(2);
+    b.UnrealizedPL    = +bondUnrealizedPL(b).toFixed(2);
+  }
+}
 
 /* ============================================================
    App shell wiring
@@ -776,6 +870,12 @@ function wrapField(mn,en,inputEl,req){
   return el('div',{class:'field'+(inputEl.classList.contains('full')?' full':'')},
     el('label',{},mn+' ',el('span',{class:'en'},'· '+en),req?el('span',{class:'req'},' *'):''),inputEl);
 }
+/** select with no placeholder; options are plain strings used as value+label */
+function optSelect(name,options,value){
+  const s=el('select',{name});
+  for(const o of options) s.append(el('option',{value:o,selected:o===value?'':null},o));
+  return s;
+}
 
 /* ============================================================
    VIEW: Transactions
@@ -976,6 +1076,243 @@ function navForm(presetFund){
       TotalNAV:nav,UnitsOutstanding:u,UnitPrice:u?nav/u:0,Source:srcIn.value,Notes:noteIn.value};
     commit(()=>state.data.NAVHistory.push(rec),'НЦХҮ бүртгэгдлээ');
   }});
+}
+
+/* ============================================================
+   VIEW: Bonds — bond portfolio tracking
+   ============================================================ */
+const beforeParen = s => String(s||'').split('(')[0].trim();
+function ccySym(c){ return (!c||c==='MNT') ? '₮' : c+' '; }
+/** signed money element, coloured green (gain) / red (loss) */
+function plMoney(v,ccy){
+  const s=num(v); const col= s>0?'var(--green)': s<0?'var(--red)':'var(--muted)';
+  return el('span',{style:'color:'+col+';font-weight:600'},(s<0?'−':'')+ccySym(ccy)+fmtMoney(Math.abs(s),0));
+}
+
+VIEWS.bonds=function(){
+  const wrap=el('div',{});
+  wrap.append(viewHead('Бондын багц','Bond Portfolio',
+    el('button',{class:'btn btn-primary',onclick:()=>bondForm()},'＋ Шинэ бонд · New bond')));
+
+  wrap.append(el('div',{class:'panel'},el('div',{class:'panel-body'},
+    el('p',{class:'muted small',style:'margin:0'},
+      'Зах зээлийн үнийг (par-ийн %) гараар шинэчилнэ. ',
+      el('strong',{},'YTM, хуримтлагдсан хүү, зах зээлийн үнэлгээ, боломжит ашиг/алдагдал'),
+      ' автоматаар тооцоологдоно. Market value = Зах зээлийн үнэ × Нэрлэсэн үнэ ÷ 100. Огнооны формат: YYYY-MM-DD.'))));
+
+  const bonds=state.data.Bonds||[];
+
+  // ---- portfolio KPIs ----
+  const totMV=bonds.reduce((s,b)=>s+bondMarketValue(b),0);
+  const totCost=bonds.reduce((s,b)=>s+bondCostValue(b),0);
+  const totAccr=bonds.reduce((s,b)=>s+bondAccruedInterest(b),0);
+  const plPct= totCost? (totMV-totCost)/totCost*100 : 0;
+  wrap.append(el('div',{class:'cards'},
+    kpi('Нийт бонд · Holdings', fmtInt(bonds.length), 'bonds'),
+    kpi('Зах зээлийн үнэлгээ', '₮'+fmtMoney(totMV,0), 'өртөг ₮'+fmtMoney(totCost,0)),
+    kpi('Боломжит ашиг/алдагдал', (totMV-totCost<0?'−₮':'₮')+fmtMoney(Math.abs(totMV-totCost),0), plPct.toFixed(2)+'%'),
+    kpi('Хуримтлагдсан хүү', '₮'+fmtMoney(totAccr,0), 'accrued interest')));
+
+  // ---- per-fund exposure ----
+  const fundsWithBonds=investableFunds().filter(f=>fundBonds(f.FundID).length);
+  if(fundsWithBonds.length){
+    const sp=el('div',{class:'panel'});
+    sp.append(el('div',{class:'panel-head'},el('h3',{},'Сан тус бүрийн бондын дүн · Per-fund exposure')));
+    const st=el('table',{class:'grid'});
+    st.innerHTML=`<thead><tr><th>Сан</th><th class="num">Бонд</th><th class="num">Нэрлэсэн нийт</th>
+      <th class="num">Өртөг</th><th class="num">Зах зээлийн үнэлгээ</th><th class="num">Ашиг/Алдагдал</th><th class="num">Хуримтлагдсан хүү</th></tr></thead>`;
+    const stb=el('tbody');
+    for(const f of fundsWithBonds){
+      const list=fundBonds(f.FundID);
+      const face=list.reduce((s,b)=>s+num(b.FaceValue),0);
+      const cost=list.reduce((s,b)=>s+bondCostValue(b),0);
+      const mv=list.reduce((s,b)=>s+bondMarketValue(b),0);
+      const accr=list.reduce((s,b)=>s+bondAccruedInterest(b),0);
+      stb.append(el('tr',{},
+        el('td',{},fundChip(f.FundID)),
+        el('td',{class:'num'},fmtInt(list.length)),
+        el('td',{class:'num'},'₮'+fmtMoney(face,0)),
+        el('td',{class:'num'},'₮'+fmtMoney(cost,0)),
+        el('td',{class:'num'},'₮'+fmtMoney(mv,0)),
+        el('td',{class:'num'},plMoney(mv-cost)),
+        el('td',{class:'num'},'₮'+fmtMoney(accr,0))));
+    }
+    st.append(stb); sp.append(el('div',{class:'table-wrap'},st)); wrap.append(sp);
+  }
+
+  // ---- bond list ----
+  const panel=el('div',{class:'panel'});
+  panel.append(el('div',{class:'panel-head'},el('h3',{},'Бондын жагсаалт · All bonds')));
+  const t=el('table',{class:'grid'});
+  t.innerHTML=`<thead><tr><th>Гаргагч · Issuer</th><th>Сан</th><th>Төрөл</th><th class="num">Нэрлэсэн үнэ</th>
+    <th class="num">Купон</th><th>Дуусах огноо</th><th class="num">Зах зээл (%)</th><th class="num">Зах зээлийн үнэлгээ</th>
+    <th class="num">YTM</th><th class="num">Хуримтлагдсан</th><th class="num">Ашиг/Алдагдал</th><th></th></tr></thead>`;
+  const tb=el('tbody');
+  if(!bonds.length) tb.append(emptyRow(12,'Бонд бүртгэгдээгүй байна. «Шинэ бонд» дарж эхлүүлнэ үү.'));
+  for(const b of [...bonds].sort((a,b)=>String(a.MaturityDate).localeCompare(String(b.MaturityDate)))){
+    const ccy=b.Currency;
+    tb.append(el('tr',{},
+      el('td',{},el('div',{},el('strong',{},b.IssuerMN||''), b.IssuerEN?el('div',{class:'small muted'},b.IssuerEN):null)),
+      el('td',{},fundChip(b.FundID)),
+      el('td',{},el('span',{class:'small'},beforeParen(b.BondType))),
+      el('td',{class:'num'},ccySym(ccy)+fmtMoney(b.FaceValue,0)),
+      el('td',{class:'num'},(num(b.CouponRate)).toFixed(2)+'%',el('div',{class:'small muted'},beforeParen(b.CouponFreq))),
+      el('td',{},fmtDate(b.MaturityDate)),
+      el('td',{class:'num'},num(b.MarketPrice)?fmtMoney(b.MarketPrice,2):el('span',{class:'muted'},'—')),
+      el('td',{class:'num'},ccySym(ccy)+fmtMoney(bondMarketValue(b),0)),
+      el('td',{class:'num'},bondYTM(b).toFixed(2)+'%'),
+      el('td',{class:'num'},ccySym(ccy)+fmtMoney(bondAccruedInterest(b),0)),
+      el('td',{class:'num'},plMoney(bondUnrealizedPL(b),ccy)),
+      el('td',{},el('div',{class:'row-actions'},
+        el('button',{class:'btn btn-ghost btn-sm',onclick:()=>bondDetail(b.BondID)},'Дэлгэрэнгүй'),
+        el('button',{class:'btn btn-ghost btn-sm',onclick:()=>bondForm(b)},'Засах')))));
+  }
+  t.append(tb); panel.append(el('div',{class:'table-wrap'},t)); wrap.append(panel);
+  return wrap;
+};
+
+function bondForm(existing){
+  const isEdit=!!existing;
+  const b=existing||{BondID:nextId('BOND',state.data.Bonds,'BondID'),Currency:'MNT',
+    BondType:BOND_TYPES[0],CouponFreq:COUPON_FREQ[1],Status:BOND_STATUS[0],
+    IssueDate:todayISO(),PurchaseDate:todayISO()};
+
+  const issuerMN=el('input',{type:'text',value:b.IssuerMN||''});
+  const issuerEN=el('input',{type:'text',value:b.IssuerEN||''});
+  const fundSel=selectEl('FundID',investableFunds().map(f=>({v:f.FundID,t:`${f.ShortName} (${f.FundID})`}))); fundSel.value=b.FundID||'';
+  const typeSel=optSelect('BondType',BOND_TYPES,b.BondType);
+  const faceIn=el('input',{type:'number',step:'0.01',min:'0',value:b.FaceValue??''});
+  const rateIn=el('input',{type:'number',step:'0.001',min:'0',value:b.CouponRate??''});
+  const freqSel=optSelect('CouponFreq',COUPON_FREQ,b.CouponFreq);
+  const issueIn=el('input',{type:'date',value:b.IssueDate||''});
+  const matIn=el('input',{type:'date',value:b.MaturityDate||''});
+  const purchPriceIn=el('input',{type:'number',step:'0.0001',min:'0',value:b.PurchasePrice??'',placeholder:'par-ийн %, ж: 100'});
+  const purchDateIn=el('input',{type:'date',value:b.PurchaseDate||''});
+  const mktIn=el('input',{type:'number',step:'0.0001',min:'0',value:b.MarketPrice??'',placeholder:'par-ийн %'});
+  const mktDateIn=el('input',{type:'date',value:b.MarketPriceDate||''});
+  const curSel=optSelect('Currency',BOND_CCY,b.Currency||'MNT');
+  const statusSel=optSelect('Status',BOND_STATUS,b.Status||BOND_STATUS[0]);
+  const noteIn=el('input',{type:'text',value:b.Notes||''});
+  const calc=el('div',{class:'calc-box'});
+
+  function readBond(){ return {FaceValue:faceIn.value,CouponRate:rateIn.value,CouponFreq:freqSel.value,
+    IssueDate:issueIn.value,MaturityDate:matIn.value,PurchasePrice:purchPriceIn.value,
+    MarketPrice:mktIn.value,MarketPriceDate:mktDateIn.value,Currency:curSel.value}; }
+  function recalc(){
+    const t=readBond(), ccy=t.Currency;
+    calc.innerHTML='';
+    calc.append(
+      crow('Зах зээлийн үнэлгээ · Market value', ccySym(ccy)+fmtMoney(bondMarketValue(t),2)),
+      crow('Өртөг · Cost', ccySym(ccy)+fmtMoney(bondCostValue(t),2)),
+      crow('Хуримтлагдсан хүү · Accrued interest', ccySym(ccy)+fmtMoney(bondAccruedInterest(t),2)),
+      crow('YTM (жилийн) · Yield to maturity', bondYTM(t).toFixed(3)+'%'),
+      crow('Боломжит ашиг/алдагдал · Unrealized P/L', (bondUnrealizedPL(t)<0?'−':'')+ccySym(ccy)+fmtMoney(Math.abs(bondUnrealizedPL(t)),2), true),
+    );
+  }
+  [faceIn,rateIn,purchPriceIn,mktIn].forEach(x=>x.addEventListener('input',recalc));
+  [freqSel,issueIn,matIn,mktDateIn,curSel].forEach(x=>x.addEventListener('change',recalc));
+
+  const body=el('div',{},
+    el('div',{class:'form-grid'},
+      wrapField('Гаргагч (Монгол)','Issuer (MN)',issuerMN,true),
+      wrapField('Гаргагч (English)','Issuer (EN)',issuerEN),
+      wrapField('Сан','Fund',fundSel,true),
+      wrapField('Бондын төрөл','Bond type',typeSel),
+      wrapField('Нэрлэсэн үнэ','Face value',faceIn,true),
+      wrapField('Купон хүү %','Coupon rate %',rateIn),
+      wrapField('Купон давтамж','Coupon frequency',freqSel),
+      wrapField('Валют','Currency',curSel),
+      wrapField('Гаргасан огноо','Issue date',issueIn),
+      wrapField('Дуусах огноо','Maturity date',matIn,true),
+      wrapField('Худалдан авсан үнэ (%)','Purchase price (%)',purchPriceIn),
+      wrapField('Худалдан авсан огноо','Purchase date',purchDateIn),
+      wrapField('Зах зээлийн үнэ (%)','Market price (%)',mktIn),
+      wrapField('Зах зээлийн үнийн огноо','Market price date',mktDateIn),
+      wrapField('Төлөв','Status',statusSel),
+      wrapField('Тэмдэглэл','Notes',noteIn),
+    ),
+    el('div',{class:'small muted',style:'margin:6px 2px'},'Доорх үзүүлэлтүүд автоматаар тооцоологдоно · auto-computed:'),
+    calc);
+  recalc();
+
+  modal(isEdit?'Бонд засах':'Шинэ бонд', body, {okText:isEdit?'Хадгалах':'Бүртгэх', wide:true, onOk:()=>{
+    if(!issuerMN.value.trim()){ toast('Гаргагчийн нэр заавал.','err'); return false; }
+    if(!fundSel.value){ toast('Сан сонгоно уу.','err'); return false; }
+    if(num(faceIn.value)<=0){ toast('Нэрлэсэн үнэ оруулна уу.','err'); return false; }
+    if(!matIn.value){ toast('Дуусах огноо оруулна уу.','err'); return false; }
+    const rec={
+      BondID:b.BondID, IssuerMN:issuerMN.value.trim(), IssuerEN:issuerEN.value.trim(),
+      FundID:fundSel.value, BondType:typeSel.value, FaceValue:num(faceIn.value),
+      CouponRate:num(rateIn.value), CouponFreq:freqSel.value, IssueDate:issueIn.value,
+      MaturityDate:matIn.value, PurchasePrice:num(purchPriceIn.value), PurchaseDate:purchDateIn.value,
+      MarketPrice:num(mktIn.value), MarketPriceDate:mktDateIn.value, Currency:curSel.value,
+      Status:statusSel.value, Notes:noteIn.value,
+    };
+    rec.YTM=+bondYTM(rec).toFixed(4); rec.AccruedInterest=+bondAccruedInterest(rec).toFixed(2);
+    rec.MarketValue=+bondMarketValue(rec).toFixed(2); rec.UnrealizedPL=+bondUnrealizedPL(rec).toFixed(2);
+    commit(()=>{ if(isEdit) Object.assign(existing,rec); else state.data.Bonds.push(rec); },
+      isEdit?'Бонд шинэчлэгдлээ':'Бонд бүртгэгдлээ ('+rec.BondID+')');
+  }});
+}
+
+function bondDetail(id){
+  const b=bondById(id); if(!b)return;
+  const ccy=b.Currency;
+  const body=el('div',{});
+  body.append(el('h3',{style:'margin:0 0 2px;color:var(--gam-navy)'},b.IssuerMN||''),
+    el('div',{class:'muted small',style:'margin-bottom:12px'},
+      (b.IssuerEN||'')+' · '+b.BondID+' · '+beforeParen(b.BondType)));
+
+  // facts
+  const two=el('div',{class:'panel-body two-col',style:'padding:0'});
+  const dl1=el('dl',{class:'def-list'}), dl2=el('dl',{class:'def-list'});
+  const add=(dl,k,v)=>{dl.append(el('dt',{},k),el('dd',{},v||'—'));};
+  add(dl1,'Сан · Fund', (fundById(b.FundID)||{}).ShortName||b.FundID);
+  add(dl1,'Нэрлэсэн үнэ · Face', ccySym(ccy)+fmtMoney(b.FaceValue,2));
+  add(dl1,'Купон · Coupon', num(b.CouponRate).toFixed(3)+'% · '+beforeParen(b.CouponFreq));
+  add(dl1,'Гаргасан · Issued', fmtDate(b.IssueDate));
+  add(dl1,'Дуусах · Maturity', fmtDate(b.MaturityDate));
+  add(dl1,'Валют · Currency', b.Currency||'MNT');
+  add(dl2,'Худалдан авсан үнэ · Purchase', num(b.PurchasePrice).toFixed(4)+'%  ('+fmtDate(b.PurchaseDate)+')');
+  add(dl2,'Зах зээлийн үнэ · Market', (num(b.MarketPrice)?num(b.MarketPrice).toFixed(4)+'%':'—')+(b.MarketPriceDate?'  ('+fmtDate(b.MarketPriceDate)+')':''));
+  add(dl2,'Зах зээлийн үнэлгээ · Market value', ccySym(ccy)+fmtMoney(bondMarketValue(b),2));
+  add(dl2,'YTM', bondYTM(b).toFixed(3)+'%');
+  add(dl2,'Хуримтлагдсан хүү · Accrued', ccySym(ccy)+fmtMoney(bondAccruedInterest(b),2));
+  two.append(dl1,dl2); body.append(two);
+  body.append(el('div',{class:'calc-box',style:'margin-top:12px'},
+    crow('Боломжит ашиг/алдагдал · Unrealized P/L',
+      (bondUnrealizedPL(b)<0?'−':'')+ccySym(ccy)+fmtMoney(Math.abs(bondUnrealizedPL(b)),2), true)));
+
+  // cashflow schedule
+  body.append(el('h4',{style:'margin:18px 0 8px;color:var(--gam-navy)'},'Мөнгөн урсгалын хуваарь · Cashflow schedule'));
+  const coupon=bondPeriodCoupon(b);
+  const dates=bondCouponDates(b);
+  const today=todayISO();
+  const t=el('table',{class:'grid'});
+  t.innerHTML=`<thead><tr><th>Огноо · Date</th><th class="num">Купон · Coupon</th><th class="num">Үндсэн төлбөр · Principal</th>
+    <th class="num">Нийт · Total</th><th>Төлөв · Status</th></tr></thead>`;
+  const tb=el('tbody');
+  if(!dates.length) tb.append(emptyRow(5,'Гаргасан/дуусах огноо болон давтамжаа оруулна уу.'));
+  let futureCoupons=0;
+  dates.forEach((d,i)=>{
+    const isLast=i===dates.length-1;
+    const principal=isLast?num(b.FaceValue):0;
+    const total=coupon+principal;
+    const paid=d<=today;
+    if(!paid) futureCoupons+=coupon;
+    tb.append(el('tr',{},
+      el('td',{},fmtDate(d)),
+      el('td',{class:'num'},ccySym(ccy)+fmtMoney(coupon,2)),
+      el('td',{class:'num'},principal?ccySym(ccy)+fmtMoney(principal,2):'—'),
+      el('td',{class:'num'},ccySym(ccy)+fmtMoney(total,2)),
+      el('td',{},el('span',{class:'badge '+(paid?'badge-gray':'badge-blue')},paid?'Төлөгдсөн':'Хүлээгдэж буй'))));
+  });
+  t.append(tb); body.append(el('div',{class:'table-wrap'},t));
+  if(dates.length) body.append(el('div',{class:'small muted',style:'margin-top:6px'},
+    'Үлдсэн купон төлбөр · remaining coupons: ',el('strong',{},ccySym(ccy)+fmtMoney(futureCoupons,2)),
+    ' · Дуусахад эргэн төлөгдөх үндсэн төлбөр · principal at maturity: ',el('strong',{},ccySym(ccy)+fmtMoney(num(b.FaceValue),2))));
+
+  modal('Бондын дэлгэрэнгүй · Bond detail', body, {okText:'Хаах', cancel:false, wide:true});
 }
 
 /* ============================================================

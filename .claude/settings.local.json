@@ -22,7 +22,8 @@
       "Read(//tmp/**)",
       "Bash(sed -i \"s|^sandbox.state.data = {|const state = vm.runInContext\\('state', sandbox\\);\\\\nstate.data = {|\" feetest.js)",
       "Bash(sed -i \"s|sandbox.state.data.Investors|state.data.Investors|g; s|sandbox.state.data.Transactions|state.data.Transactions|g\" feetest.js)",
-      "Bash(node /tmp/feetest.js)"
+      "Bash(node /tmp/feetest.js)",
+      "Bash(grep *)"
     ]
   }
 }
