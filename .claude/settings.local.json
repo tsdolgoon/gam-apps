@@ -24,7 +24,8 @@
       "Bash(sed -i \"s|sandbox.state.data.Investors|state.data.Investors|g; s|sandbox.state.data.Transactions|state.data.Transactions|g\" feetest.js)",
       "Bash(node /tmp/feetest.js)",
       "Bash(grep *)",
-      "Bash(pip list *)"
+      "Bash(pip list *)",
+      "Bash(awk -F'|' '/^\\\\| [0-9]+ \\\\|/ { if \\(NF != 6\\) print \"  line \"NR\": \"$0 }' TERMS.md)"
     ]
   }
 }
