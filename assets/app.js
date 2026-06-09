@@ -136,6 +136,10 @@ const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
 const FILE_NAME = SHARED_FILE_PATH.split('/').pop();
 const _SP_HOST = new URL(SHAREPOINT_SITE).hostname;
 const _SP_DRIVE_PATH = SHARED_FILE_PATH;
+/* Address the shared workbook through the signed-in user's own drive.
+   The shared SharePoint folder is shared with the user's M365 account, so
+   /me/drive resolves it — no /sites lookup (Sites.Read.All) required. */
+const _DRIVE_CONTENT = '/me/drive/root:'+SHARED_FILE_PATH+':/content';
 const msalApp = new msal.PublicClientApplication(MSAL_CONFIG);
 
 async function getToken(){
@@ -161,19 +165,8 @@ async function gFetch(path, opts={}){
   return resp;
 }
 
-let _spSiteId = null;
-async function getSpSiteId(){
-  if(_spSiteId) return _spSiteId;
-  console.log('[GAM] _SP_HOST value:', _SP_HOST);
-  console.log('[GAM] Full URL being called:', '/sites/'+_SP_HOST+':/');
-  const resp = await gFetch('/sites/'+_SP_HOST+':/');
-  const data = await resp.json();
-  _spSiteId = data.id;
-  return _spSiteId;
-}
-
 /* ============================================================
-   SharePoint workbook operations
+   SharePoint workbook operations (via /me/drive)
    ============================================================ */
 async function signIn(){
   try{
@@ -198,88 +191,17 @@ async function signOut(){
   updateFileStatus();
 }
 
-async function testSharePointAccess(){
-  console.log('[GAM] ========= SharePoint Access Test =========');
-  let token;
-  try{ token = await getToken(); }
-  catch(e){ console.error('[GAM] getToken() failed:', e); return; }
-
-  // Decode and log token claims
-  try{
-    const p = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-    console.log('[GAM] Token scp   :', p.scp);
-    console.log('[GAM] Token aud   :', p.aud);
-    console.log('[GAM] Token upn   :', p.upn);
-    console.log('[GAM] Token roles :', p.roles);
-  }catch{ console.warn('[GAM] Could not decode token payload'); }
-
-  const hdrs = { Authorization: 'Bearer '+token };
-
-  // Test 1 — site lookup
-  const siteUrl = 'https://graph.microsoft.com/v1.0/sites/'+_SP_HOST+':/';
-  console.log('[GAM] --- Test 1: GET', siteUrl, '---');
-  try{
-    const r = await fetch(siteUrl, { headers: hdrs });
-    console.log('[GAM] Status:', r.status, r.statusText);
-    const h = {}; r.headers.forEach((v,k) => h[k]=v);
-    console.log('[GAM] Headers:', h);
-    console.log('[GAM] Body:', await r.text());
-  }catch(e){ console.error('[GAM] Fetch error:', e); }
-
-  // Test 2 — personal drive (baseline)
-  const driveUrl = 'https://graph.microsoft.com/v1.0/me/drive';
-  console.log('[GAM] --- Test 2: GET', driveUrl, '---');
-  try{
-    const r = await fetch(driveUrl, { headers: hdrs });
-    console.log('[GAM] Status:', r.status, r.statusText);
-    console.log('[GAM] Body:', await r.text());
-  }catch(e){ console.error('[GAM] Fetch error:', e); }
-
-  console.log('[GAM] =============================================');
-}
-
 async function findOrCreateWorkbook(){
-  let token;
-  try{ token = await getToken(); }
-  catch(e){ gateError('Токен авахад алдаа: '+e.message); return; }
-
-  // Log token scopes so we can see exactly what was granted
   try{
-    const p = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-    console.log('[GAM] findOrCreateWorkbook — token scp:', p.scp, '| aud:', p.aud);
-  }catch{}
-
-  let siteId;
-  try{ siteId = await getSpSiteId(); }
-  catch(e){
-    console.error('[GAM] getSpSiteId() failed:', e);
-    gateError('SharePoint сайтын ID авахад алдаа: '+e.message);
-    return;
+    const resp = await gFetch(_DRIVE_CONTENT);            // GET /me/drive/root:<path>:/content
+    loadWorkbookBuffer(await resp.arrayBuffer());
+    enterApp();
+    toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
+  }catch(e){
+    if(e.status===404){ await createWorkbookOnSharePoint(); return; }   // file not there yet → create it
+    console.error('[GAM] findOrCreateWorkbook:', e);
+    gateError('SharePoint алдаа: '+(e.message||String(e)));
   }
-
-  const url = 'https://graph.microsoft.com/v1.0/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content';
-  console.log('[GAM] findOrCreateWorkbook URL:', url);
-
-  // Raw fetch so we can log headers + body before throwing
-  let rawResp;
-  try{ rawResp = await fetch(url, { headers: { Authorization: 'Bearer '+token } }); }
-  catch(e){ gateError('SharePoint алдаа: '+e.message); console.error('[GAM]', e); return; }
-
-  const respHdr = {}; rawResp.headers.forEach((v,k) => respHdr[k]=v);
-  console.log('[GAM] Response status:', rawResp.status, rawResp.statusText);
-  console.log('[GAM] Response headers:', respHdr);
-
-  if(!rawResp.ok){
-    const body = await rawResp.text();
-    console.log('[GAM] Error body:', body);
-    if(rawResp.status===404){ await createWorkbookOnSharePoint(); return; }
-    gateError('SharePoint алдаа '+rawResp.status+': '+body.slice(0,200));
-    return;
-  }
-
-  loadWorkbookBuffer(await rawResp.arrayBuffer());
-  enterApp();
-  toast('SharePoint-аас файл ачааллаа.','ok','Холбогдлоо');
 }
 
 async function createWorkbookOnSharePoint(){
@@ -321,18 +243,20 @@ function loadWorkbookBuffer(buf){
 }
 
 async function ensureSpFolder(){
-  const siteId = await getSpSiteId();
-  const parts = _SP_DRIVE_PATH.split('/').filter(Boolean);
+  const parts = SHARED_FILE_PATH.split('/').filter(Boolean);
   const folderParts = parts.slice(0, -1); // e.g. ['Shared Documents', 'GAM Back Office']
   if(!folderParts.length) return;
   const folderDrivePath = '/' + folderParts.join('/');
   try{
-    await gFetch('/sites/'+siteId+'/drive/root:'+folderDrivePath);
+    await gFetch('/me/drive/root:'+folderDrivePath);
   }catch(e){
     if(e.status===404){
       const name = folderParts[folderParts.length-1];
       const parentDrivePath = '/' + folderParts.slice(0,-1).join('/');
-      await gFetch('/sites/'+siteId+'/drive/root:'+parentDrivePath+':/children',{
+      const childrenPath = parentDrivePath==='/'
+        ? '/me/drive/root/children'
+        : '/me/drive/root:'+parentDrivePath+':/children';
+      await gFetch(childrenPath,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({name, folder:{}, '@microsoft.graph.conflictBehavior':'replace'}),
@@ -350,9 +274,8 @@ async function saveToSharePoint(silent){
     XLSX.utils.book_append_sheet(wb,ws,sheet);
   }
   const out = XLSX.write(wb,{bookType:'xlsx',type:'array'});
-  const siteId = await getSpSiteId();
   await ensureSpFolder();
-  await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content',{
+  await gFetch(_DRIVE_CONTENT,{                            // PUT /me/drive/root:<path>:/content
     method: 'PUT',
     headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
     body: new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
@@ -366,8 +289,7 @@ async function saveToSharePoint(silent){
 async function reloadFromSharePoint(){
   if(!state.account) return;
   try{
-    const siteId = await getSpSiteId();
-    const resp = await gFetch('/sites/'+siteId+'/drive/root:'+_SP_DRIVE_PATH+':/content');
+    const resp = await gFetch(_DRIVE_CONTENT);            // GET /me/drive/root:<path>:/content
     loadWorkbookBuffer(await resp.arrayBuffer());
     render();
     toast('SharePoint-аас дахин ачаалагдлаа.','ok');
@@ -1493,7 +1415,6 @@ async function init(){
       state.account = account;
       updateTopBarUser();
       gateInfo('SharePoint-аас файлыг хайж байна…');
-      await testSharePointAccess();
       await findOrCreateWorkbook();
     }
   }catch(e){ console.warn('MSAL restore:', e); }
