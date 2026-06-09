@@ -407,6 +407,13 @@ function navAsOf(fundId,dateStr){
     .sort((a,b)=>String(b.Date).localeCompare(String(a.Date)));
   return rows.length? num(rows[0].TotalNAV) : 0;
 }
+/** unit price recorded on or before a given date (fallback nominal) */
+function unitPriceAsOf(fundId,dateStr){
+  const f=fundById(fundId);
+  const rows=state.data.NAVHistory.filter(n=>n.FundID===fundId&&num(n.UnitPrice)>0&&String(n.Date)<=dateStr)
+    .sort((a,b)=>String(b.Date).localeCompare(String(a.Date)));
+  return rows.length ? num(rows[0].UnitPrice) : (f?num(f.NominalPrice):0);
+}
 
 /* ---------- ECIF (Employee Contribution Investment Fund) ---------- */
 const ECIF_TARGET_FUND='SGF'; // ECIF firms are nominal holders of Stable Growth Fund
@@ -655,6 +662,7 @@ function investorRow(i){
     el('td',{},statusBadge(i.Status||'Идэвхтэй')),
     el('td',{},el('div',{class:'row-actions'},
       el('button',{class:'btn btn-ghost btn-sm',onclick:()=>investorDetail(i.InvestorID)},'Дэлгэрэнгүй'),
+      el('button',{class:'btn btn-ghost btn-sm',onclick:()=>statementForm(i.InvestorID)},'Тайлан'),
       el('button',{class:'btn btn-ghost btn-sm',onclick:()=>investorForm(i)},'Засах'))),
   );
   return tr;
@@ -727,6 +735,268 @@ function investorDetail(id){
   body.append(el('h4',{style:'margin:18px 0 8px;color:var(--gam-navy)'},'Гүйлгээ · Transactions'));
   body.append(el('div',{class:'table-wrap'},txnTable(txns,true)));
   modal('Хөрөнгө оруулагчийн дэлгэрэнгүй', body, {okText:'Хаах', cancel:false, wide:true});
+}
+
+/* ============================================================
+   Investor statement (printable, A4) — reads Investors /
+   Transactions / Funds / NAVHistory only; no extra storage.
+   ============================================================ */
+const STMT_PERIODS = {        // label -> length in months
+  'Сар · Monthly':      1,
+  'Улирал · Quarterly': 3,
+  'Жил · Annually':     12,
+};
+const TXN_LABEL = {
+  [TXN_TYPE.SUB]:    'Худалдан авалт · Subscription',
+  [TXN_TYPE.RED]:    'Буцаан худалдалт · Redemption',
+  [TXN_TYPE.MGMT]:   'Удирдлагын шимтгэл · Management fee',
+  [TXN_TYPE.SUCCESS]:'Гүйцэтгэлийн шимтгэл · Success fee',
+  [TXN_TYPE.TAX]:    'Татвар · Withholding tax',
+};
+
+/** small modal to choose the reporting period before generating */
+function statementForm(investorId){
+  const inv=investorById(investorId);
+  if(!inv){ toast('Хөрөнгө оруулагч олдсонгүй.','err'); return; }
+  const periodSel=optSelect('period',Object.keys(STMT_PERIODS),'Улирал · Quarterly');
+  const asOfIn=el('input',{type:'date',value:todayISO()});
+  const body=el('div',{},
+    el('div',{class:'small muted',style:'margin-bottom:10px'},'Хөрөнгө оруулагч: ',
+      el('strong',{},inv.NameMN||inv.InvestorID)),
+    el('div',{class:'form-grid'},
+      wrapField('Тайлант хугацаа','Period',periodSel,true),
+      wrapField('Тайлангийн огноо','Statement date',asOfIn,true)),
+    el('div',{class:'small muted',style:'margin-top:6px'},
+      'Үнэлгээ нь сонгосон огнооны байдлаар тооцоологдоно. Огнооны формат: YYYY-MM-DD.'));
+  modal('Тайлан үүсгэх · Generate statement', body, {okText:'Үүсгэх · Generate', onOk:()=>{
+    const end=asOfIn.value||todayISO();
+    const start=addMonths(end, -(STMT_PERIODS[periodSel.value]||3));
+    openInvestorStatement(investorId, periodSel.value, start, end);
+  }});
+}
+
+/** assemble all statement figures as of `endDate` from the existing sheets */
+function computeStatementData(investorId, endDate){
+  const conf=state.data.Transactions.filter(t=>t.InvestorID===investorId
+    && t.Status==='Баталгаажсан' && String(t.TradeDate)<=endDate);
+  const sumType=(type,fid)=>conf.filter(t=>t.Type===type && t.FundID===fid)
+    .reduce((s,t)=>s+num(t.NetAmount),0);
+  const fundIds=[...new Set(conf.map(t=>t.FundID))];
+
+  const funds=[];
+  for(const fid of fundIds){
+    const f=fundById(fid); if(!f) continue;
+    const subs=conf.filter(t=>t.Type===TXN_TYPE.SUB && t.FundID===fid)
+      .sort((a,b)=>String(a.TradeDate).localeCompare(String(b.TradeDate)));
+    const trades=conf.filter(t=>isTradeType(t.Type) && t.FundID===fid);
+    const units=trades.reduce((s,t)=>s+(t.Type===TXN_TYPE.SUB?num(t.Units):-num(t.Units)),0);
+    const netInvested=trades.reduce((s,t)=>s+(t.Type===TXN_TYPE.SUB?num(t.NetAmount):-num(t.NetAmount)),0);
+    const initialGross=subs.reduce((s,t)=>s+num(t.GrossAmount),0);
+    const price=unitPriceAsOf(fid,endDate);
+    const value=units*price;
+    const mgmtFee=sumType(TXN_TYPE.MGMT,fid), successFee=sumType(TXN_TYPE.SUCCESS,fid), tax=sumType(TXN_TYPE.TAX,fid);
+    const grossReturn=value-netInvested;
+    const hurdle=num(f.HurdleRatePct);
+    funds.push({fund:f, investDate:subs.length?subs[0].TradeDate:'', initialGross, mgmtFee, netInvested,
+      units, price, value, hurdle, targetReturn:netInvested*hurdle/100,
+      actualRetPct: netInvested>0?grossReturn/netInvested*100:0,
+      successFee, tax, grossReturn, netReturn:grossReturn-successFee-tax});
+  }
+  funds.sort((a,b)=>String(a.fund.FundID).localeCompare(String(b.fund.FundID)));
+
+  // full ledger with per-fund running unit balance
+  const bal={};
+  const rows=[...conf]
+    .sort((a,b)=>String(a.TradeDate).localeCompare(String(b.TradeDate))||String(a.TxnID).localeCompare(String(b.TxnID)))
+    .map(t=>{
+      const u=t.Type===TXN_TYPE.SUB?num(t.Units): t.Type===TXN_TYPE.RED?-num(t.Units):0;
+      bal[t.FundID]=(bal[t.FundID]||0)+u;
+      return {t, units:u, balance:bal[t.FundID]};
+    });
+
+  const totals={
+    invested:    funds.reduce((s,r)=>s+r.initialGross,0),
+    netInvested: funds.reduce((s,r)=>s+r.netInvested,0),
+    mgmt:        funds.reduce((s,r)=>s+r.mgmtFee,0),
+    success:     funds.reduce((s,r)=>s+r.successFee,0),
+    tax:         funds.reduce((s,r)=>s+r.tax,0),
+    value:       funds.reduce((s,r)=>s+r.value,0),
+    netReturn:   funds.reduce((s,r)=>s+r.netReturn,0),
+  };
+  totals.feesPaid=totals.mgmt+totals.success;
+  totals.returnPct= totals.netInvested>0 ? totals.netReturn/totals.netInvested*100 : 0;
+  return {funds, rows, totals};
+}
+
+/** signed cash amount of a ledger row from the investor's perspective */
+function stmtLedgerAmount(t){
+  if(t.Type===TXN_TYPE.SUB) return num(t.GrossAmount);   // contribution in
+  if(t.Type===TXN_TYPE.RED) return -num(t.NetAmount);    // redemption out
+  return -num(t.NetAmount);                              // fees & tax deducted
+}
+
+function openInvestorStatement(investorId, periodLabel, start, end){
+  const inv=investorById(investorId); if(!inv) return;
+  const data=computeStatementData(investorId, end);
+  const logoUrl=new URL('assets/logo.png', window.location.href).href;
+  const html=buildStatementHTML(inv, periodLabel, start, end, data, todayISO(), logoUrl);
+  const w=window.open('', '_blank');
+  if(!w){ toast('Попап хаагдсан тул тайлан нээгдсэнгүй. Хөтчийн попап зөвшөөрлийг идэвхжүүлнэ үү.','err','Тайлан'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+function buildStatementHTML(inv, periodLabel, start, end, data, genDate, logoUrl){
+  const m  =(v,dec=0)=>'₮'+fmtMoney(v,dec);
+  const sm =(v,dec=0)=>(num(v)<0?'−₮':'₮')+fmtMoney(Math.abs(v),dec);
+  const cls=v=>num(v)<0?'neg':'pos';
+  const kv =(mn,en,val,total)=>`<div class="kv-row${total?' kv-total':''}"><span class="kv-l">${mn} <i>· ${en}</i></span><span class="kv-v">${val}</span></div>`;
+
+  const fundsHTML = data.funds.length ? data.funds.map(r=>`
+    <section class="fund">
+      <h3><span class="fdot" style="background:${esc(r.fund.Color||'#1366c4')}"></span>
+        ${esc(r.fund.NameMN||r.fund.ShortName||r.fund.FundID)}${r.fund.NameEN?` <i>· ${esc(r.fund.NameEN)}</i>`:''}</h3>
+      <div class="kv">
+        ${kv('Хөрөнгө оруулсан огноо','Investment date', fmtDate(r.investDate)||'—')}
+        ${kv('Анхны хөрөнгө оруулалт','Initial investment', m(r.initialGross))}
+        ${kv('Удирдлагын шимтгэл','Management fee deducted', '−'+m(r.mgmtFee))}
+        ${kv('Цэвэр оруулсан дүн','Net invested amount', m(r.netInvested))}
+        ${kv('Нэгж эрх','Units / shares', fmtUnits(r.units))}
+        ${kv('Нэгж эрхийн үнэ (тайлант огноонд)','Unit NAV at statement date', m(r.price,2))}
+        ${kv('Одоогийн үнэлгээ','Current value', m(r.value))}
+        ${kv('Босго хүү','Hurdle rate', r.hurdle.toFixed(2)+'%')}
+        ${kv('Зорилтот өгөөж','Target return', m(r.targetReturn))}
+        ${kv('Бодит өгөөж','Actual return', `<span class="${cls(r.actualRetPct)}">${r.actualRetPct.toFixed(2)}%</span> (${sm(r.grossReturn)})`)}
+        ${kv('Гүйцэтгэлийн шимтгэл','Success fee', '−'+m(r.successFee))}
+        ${kv('Суутгасан татвар','Tax withheld', '−'+m(r.tax))}
+        ${kv('Цэвэр өгөөж','Net return to investor', `<strong class="${cls(r.netReturn)}">${sm(r.netReturn)}</strong>`, true)}
+      </div>
+    </section>`).join('') :
+    `<p class="muted center">Энэ огнооны байдлаар идэвхтэй эзэмшил / гүйлгээ алга.<br><i>No holdings or activity as of this date.</i></p>`;
+
+  const ledgerHTML = data.rows.length ? data.rows.map(({t,units,balance})=>{
+    const amt=stmtLedgerAmount(t), f=fundById(t.FundID);
+    const desc=[f?f.ShortName:t.FundID, t.Notes||''].filter(Boolean).join(' — ');
+    return `<tr>
+      <td>${fmtDate(t.TradeDate)}</td>
+      <td>${esc(TXN_LABEL[t.Type]||t.Type)}</td>
+      <td>${esc(desc)}</td>
+      <td class="num ${amt<0?'neg':''}">${sm(amt)}</td>
+      <td class="num">${units?fmtUnits(units):'—'}</td>
+      <td class="num">${fmtUnits(balance)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" class="muted center">Гүйлгээ алга · No transactions</td></tr>`;
+
+  const pr=(mn,en,val,extra='')=>`<tr><td>${mn} <i>· ${en}</i></td><td class="num ${extra}">${val}</td></tr>`;
+  const summaryHTML=`
+    ${pr('Нийт хөрөнгө оруулалт','Total invested', m(data.totals.invested))}
+    ${pr('Нийт шимтгэл (удирдлага + гүйцэтгэл)','Total fees paid', m(data.totals.feesPaid))}
+    ${pr('Суутгасан татвар','Total tax withheld', m(data.totals.tax))}
+    ${pr('Багцын одоогийн үнэлгээ','Current portfolio value', m(data.totals.value))}
+    ${pr('Нийт цэвэр өгөөж','Total net return', `<strong>${sm(data.totals.netReturn)}</strong>`, cls(data.totals.netReturn))}
+    ${pr('Өгөөжийн хувь','Return percentage', `<strong>${data.totals.returnPct.toFixed(2)}%</strong>`, cls(data.totals.returnPct))}`;
+
+  const name=esc(inv.NameMN||'')+(inv.NameEN?` · ${esc(inv.NameEN)}`:'');
+
+  return `<!doctype html><html lang="mn"><head><meta charset="utf-8">
+<title>Хөрөнгө оруулагчийн тайлан — ${esc(inv.InvestorID)}</title>
+<style>
+  :root{--navy:#0b2e4f;--blue:#1366c4;--gold:#c8a14b;--green:#1c8a4a;--red:#c0392b;--muted:#6b7785;--line:#dce3ea}
+  *{box-sizing:border-box}
+  body{margin:0;background:#eef1f5;color:#1b2733;font:13px/1.5 "Segoe UI",Arial,sans-serif}
+  .toolbar{position:sticky;top:0;display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;background:var(--navy)}
+  .toolbar button{font:600 13px/1 "Segoe UI",Arial;padding:9px 18px;border:0;border-radius:7px;cursor:pointer}
+  .btn-print{background:var(--gold);color:var(--navy)}
+  .btn-close{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)!important}
+  .sheet{background:#fff;max-width:820px;margin:18px auto;padding:32px 36px;box-shadow:0 2px 14px rgba(0,0,0,.12)}
+  header.stmt{display:flex;align-items:center;gap:16px;border-bottom:3px solid var(--navy);padding-bottom:16px}
+  header.stmt .logo{width:54px;height:54px;border-radius:10px;object-fit:contain}
+  header.stmt .logo-fb{width:54px;height:54px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#e0c074);
+    color:var(--navy);font-weight:800;display:none;align-items:center;justify-content:center;font-size:18px}
+  header.stmt .co{font-size:18px;font-weight:800;color:var(--navy)}
+  header.stmt .co small{display:block;font-weight:600;color:var(--muted);font-size:11px;letter-spacing:.3px}
+  .title{margin:18px 0 4px;font-size:20px;font-weight:800;color:var(--navy)}
+  .title i{font-weight:600;color:var(--blue);font-style:normal}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin:14px 0 4px;font-size:12.5px}
+  .meta .row{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:3px 0}
+  .meta .row span:first-child{color:var(--muted)}
+  .meta .row span:last-child{font-weight:600;text-align:right}
+  h2.sec{margin:26px 0 10px;font-size:14px;color:#fff;background:var(--navy);padding:7px 12px;border-radius:6px;letter-spacing:.3px}
+  h2.sec i{font-weight:500;opacity:.85;font-style:normal}
+  section.fund{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+  section.fund h3{margin:0 0 8px;font-size:14px;color:var(--navy);display:flex;align-items:center;gap:8px}
+  section.fund h3 i{font-weight:500;color:var(--muted);font-style:normal}
+  .fdot{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+  .kv-row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dotted var(--line);font-size:12.5px}
+  .kv-l{color:var(--muted)} .kv-l i{font-style:normal;opacity:.8}
+  .kv-v{font-weight:600;text-align:right;white-space:nowrap}
+  .kv-total{grid-column:1/-1;border-bottom:0;border-top:2px solid var(--navy);margin-top:4px;padding-top:7px;font-size:13.5px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  thead th{background:#f3f6fa;color:var(--navy);text-align:left;padding:7px 9px;border-bottom:2px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.3px}
+  tbody td{padding:6px 9px;border-bottom:1px solid var(--line)}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  table.summary td:first-child{color:#33414f} table.summary td.num{font-weight:700}
+  table.summary tr:last-child td{border-bottom:0}
+  .pos{color:var(--green)} .neg{color:var(--red)} .muted{color:var(--muted)} .center{text-align:center}
+  footer.stmt{margin-top:28px;border-top:2px solid var(--line);padding-top:14px;font-size:11px;color:var(--muted)}
+  footer.stmt .conf{background:#f3f6fa;border-left:3px solid var(--gold);padding:8px 11px;border-radius:4px;margin-bottom:10px}
+  footer.stmt strong{color:#33414f}
+  @page{size:A4;margin:13mm}
+  @media print{
+    body{background:#fff}
+    .toolbar{display:none!important}
+    .sheet{box-shadow:none;margin:0;max-width:none;padding:0}
+    section.fund{break-inside:avoid} tr{break-inside:avoid}
+    .pos,.neg,h2.sec,.btn-print,header.stmt{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style></head><body>
+  <div class="toolbar">
+    <button class="btn-print" onclick="window.print()">🖨 Хэвлэх · Print</button>
+    <button class="btn-close" onclick="window.close()">Хаах · Close</button>
+  </div>
+  <div class="sheet">
+    <header class="stmt">
+      <img class="logo" src="${esc(logoUrl)}" alt="GAM" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="logo-fb">GAM</div>
+      <div class="co">Голомт Ассет Менежмент<small>Golomt Asset Management · «Голомт Ассет Менежмент ҮЦК» ХХК</small></div>
+    </header>
+
+    <div class="title">Хөрөнгө оруулагчийн тайлан <i>· Investor Statement</i></div>
+
+    <div class="meta">
+      <div class="row"><span>Хөрөнгө оруулагч · Investor</span><span>${name||'—'}</span></div>
+      <div class="row"><span>Дугаар · ID</span><span>${esc(inv.InvestorID||'—')}</span></div>
+      <div class="row"><span>Регистр · Registration no.</span><span>${esc(inv.RegNo||'—')}</span></div>
+      <div class="row"><span>Харьяалал · Residency</span><span>${esc(inv.Residency||'—')}</span></div>
+      <div class="row"><span>Тайлант хугацаа · Period</span><span>${esc(periodLabel)}</span></div>
+      <div class="row"><span>Огнооны хязгаар · Date range</span><span>${fmtDate(start)} — ${fmtDate(end)}</span></div>
+      <div class="row"><span>Тайлант огноо · Statement date</span><span>${fmtDate(end)}</span></div>
+      <div class="row"><span>Үүсгэсэн огноо · Generated</span><span>${fmtDate(genDate)}</span></div>
+    </div>
+
+    <h2 class="sec">Сан тус бүрийн мэдээлэл <i>· Holdings by fund</i></h2>
+    ${fundsHTML}
+
+    <h2 class="sec">Гүйлгээний түүх <i>· Transaction history</i></h2>
+    <table>
+      <thead><tr><th>Огноо<br>Date</th><th>Төрөл<br>Type</th><th>Тайлбар<br>Description</th>
+        <th class="num">Дүн<br>Amount</th><th class="num">Нэгж<br>Units</th><th class="num">Үлдэгдэл<br>Balance</th></tr></thead>
+      <tbody>${ledgerHTML}</tbody>
+    </table>
+
+    <h2 class="sec">Гүйцэтгэлийн нэгдсэн дүн <i>· Performance summary</i></h2>
+    <table class="summary"><tbody>${summaryHTML}</tbody></table>
+
+    <footer class="stmt">
+      <div class="conf"><strong>Нууцлалын мэдэгдэл:</strong> Энэхүү тайлан нь зөвхөн дээр нэрлэгдсэн хөрөнгө оруулагчид
+        зориулагдсан бөгөөд нууц мэдээлэл агуулна. Зөвшөөрөлгүйгээр хуулбарлах, тараахыг хориглоно.<br>
+        <i><strong>Confidentiality notice:</strong> This statement is intended solely for the named investor and contains
+        confidential information. Unauthorised copying or distribution is prohibited.</i></div>
+      <div>Энэ тайланг <strong>GAM Back Office System</strong>-ээр үүсгэв · Generated by GAM Back Office System.</div>
+      <div>Холбоо барих · Contact: «Голомт Ассет Менежмент ҮЦК» ХХК · [хаяг / address] · [утас / phone] · [и-мэйл / email]</div>
+    </footer>
+  </div>
+</body></html>`;
 }
 
 /* ============================================================
