@@ -2250,7 +2250,7 @@ VIEWS.ecif=function(){
 
 function firmForm(existing){
   const isEdit=!!existing;
-  const f=existing||{FirmID:nextId('FIRM',state.data.ECIFFirms,'FirmID'),JoinDate:todayISO(),PortfolioVariant:'Хувилбар 1 (Бонд 40 / Хувьцаа 45 / Альт 15)',Status:'Идэвхтэй'};
+  const f=existing||{FirmID:nextId('FIRM',state.data.ECIFFirms,'FirmID'),JoinDate:todayISO(),PortfolioVariant:'Хувилбар 1 — Бага эрсдэл (Бонд 85 / Бэлэн мөнгө 15)',Status:'Идэвхтэй'};
   const g=(name,mn,en,opts={})=>fieldHTML(name,mn,en,f[name],opts);
   const body=el('div',{},el('div',{class:'form-grid'},
     g('FirmID','Дугаар','ID',{readonly:true}),
@@ -2260,7 +2260,7 @@ function firmForm(existing){
     g('RegNo','Улсын бүртгэлийн дугаар','Registration no.'),
     g('EmployeeCount','Нийт ажилтан (тоо)','Headcount',{type:'number'}),
     g('PortfolioVariant','Багцын хувилбар','Portfolio variant',{type:'select',
-      options:['Хувилбар 1 (Бонд 40 / Хувьцаа 45 / Альт 15)','Хувилбар 2 (Бонд 85 / Хувьцаа 15)'],full:true}),
+      options:['Хувилбар 1 — Бага эрсдэл (Бонд 85 / Бэлэн мөнгө 15)','Хувилбар 2 — Дунд эрсдэл (Бонд 40 / Олон улсын сангийн нэгж 25 / Хувьцаа 20 / Бэлэн мөнгө 15)'],full:true}),
     g('ContactPerson','Холбоо барих хүн','Contact'),
     g('Phone','Утас','Phone'),
     g('Email','И-мэйл','Email',{type:'email'}),
