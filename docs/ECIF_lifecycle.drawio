@@ -1,0 +1,157 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="ecif-lifecycle" name="ECIF Lifecycle">
+    <mxGraphModel dx="900" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="2300" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== Title ===== -->
+        <mxCell id="title" value="ECIF — Ажилчдын хуримтлалын сангийн амьдралын мөчлөг&#10;Employee Contribution Investment Fund — Lifecycle" style="text;html=1;align=center;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#1F3864;" vertex="1" parent="1">
+          <mxGeometry x="280" y="20" width="540" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase band labels ===== -->
+        <mxCell id="ph1" value="1. БАЙГУУЛАЛТ&#10;Establishment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;fontColor=#1F3864;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="130" width="210" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="ph2" value="2. ХУРИМТЛАЛ&#10;Contribution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;fontColor=#205020;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="210" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="ph3" value="3. ХӨРӨНГӨ ОРУУЛАЛТ &amp; ӨСӨЛТ&#10;Investment &amp; Growth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4f1f4;strokeColor=#0e8088;fontStyle=1;fontSize=13;fontColor=#0e5258;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="880" width="210" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="ph4" value="4. ЭРХ ҮҮСЭХ &amp; ХУВААРИЛАЛТ&#10;Vesting &amp; Distribution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;fontColor=#7a4f00;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1210" width="210" height="560" as="geometry" />
+        </mxCell>
+        <mxCell id="ph5" value="5. ДУУСГАВАР&#10;Maturity / Wind-down" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=13;fontColor=#5b3a73;verticalAlign=top;spacingTop=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1840" width="210" height="320" as="geometry" />
+        </mxCell>
+
+        <!-- ===== START ===== -->
+        <mxCell id="start" value="ЭХЛЭЛ — Компани сайн дурын ECIF байгуулна&#10;Company establishes voluntary ECIF" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="50" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase 1 ===== -->
+        <mxCell id="p1" value="Нэгж эрх худалдан авах гэрээ — GAM-тай&#10;Unit Purchase Agreement with GAM&#10;(«Stable Growth Private Fund»)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="320" y="140" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="Ажилтны хөрөнгө оруулалтын гэрээ + дүйцүүлэх данс&#10;Employee Investment Mgmt Agreement;&#10;matching sub-account opened per employee" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="320" y="240" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="Багцын хувилбар сонгох&#10;Select portfolio option:&#10;1) Бага эрсдэл — Бонд 85 / Бэлэн 15&#10;2) Дунд эрсдэл — Бонд 40 / ОУ-сан 25 / Хувьцаа 20 / Бэлэн 15" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="320" y="340" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="Апп: байгууллага бүртгэх → SGF нэрлэсэн данс үүснэ;&#10;ажилтнуудыг дэд данс болгон бүртгэх&#10;(App: ECIFFirms → SGF nominal account; ECIFEmployees)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="320" y="450" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase 2 ===== -->
+        <mxCell id="p5" value="Сар бүр: ажилтан цалингийн 5% + компани 5% дүйцүүлэн оруулна&#10;Monthly: employee 5% of post-tax salary + company 5% match" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="560" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p6" value="Нийлбэр хувь нэмэр SGF-ийн нэгж эрхийг үнээр худалдан авна&#10;Pooled contribution buys SGF units at unit price" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="660" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p7" value="Нэгж эрхийг ажилтан тус бүрийн дэд дансанд хуваарилна&#10;Units allocated to each employee sub-account (ECIFContributions)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="750" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase 3 ===== -->
+        <mxCell id="p8" value="GAM хөрөнгийг багцын дагуу удирдана; улирал бүр дахин тэнцвэржүүлнэ&#10;GAM manages assets per portfolio; quarterly rebalancing" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d4f1f4;strokeColor=#0e8088;" vertex="1" parent="1">
+          <mxGeometry x="320" y="880" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p9" value="Golomt Custodian — үнэлгээ, хадгалалт, тооцоо&#10;Golomt Custodian — valuation, custody, settlement" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d4f1f4;strokeColor=#0e8088;" vertex="1" parent="1">
+          <mxGeometry x="320" y="980" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p10" value="НЦХҮ/нэгж эрхийн үнэ шинэчлэгдэж үлдэгдэл өснө&#10;NAV / unit price updates → balances grow&#10;Шимтгэл: удирдлага 1.5%, гүйцэтгэл 20% (босго = бодлогын хүү + 5%)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d4f1f4;strokeColor=#0e8088;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1080" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase 4 ===== -->
+        <mxCell id="d1" value="Хуваарилалтын нөхцөл үүсэв үү?&#10;Distribution trigger?&#10;(гарах / тэтгэвэр / онцгой / босго)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1210" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p11" value="Ажилласан жилээр ажил олгогчийн хувь хэсгийн эрх тооцно&#10;Determine vested employer % by years of service&#10;1–2ж 0% · 3–4ж 20% · 5–6ж 40% · 7–8ж 60% · 9–10ж 80% · 11ж+ 100%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1350" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d2" value="Эрх үүсэх нөхцөл хангагдсан уу?&#10;Vesting conditions met?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1470" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p12" value="Ажилтан өөрийн хувь нэмэр + өгөөжийг 100% авна.&#10;Олгогдоогүй ажил олгогчийн хэсэг санд үлдэж&#10;ирээдүйн ажилтнуудад зарцуулагдана&#10;(Employee keeps 100% own contribution + return;&#10;unvested employer portion stays in the Fund)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fde0dc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="660" y="1460" width="280" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p13" value="Компани хуваарилалтыг батална&#10;Company approves distribution" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1610" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p14" value="Ажилтанд: өөрийн хувь + эрх үүссэн ажил олгогчийн хэсэг олгоно&#10;Disburse: employee portion + vested employer portion&#10;(тэтгэвэр 100%; онцгой нөхцөл 20–100% компанийн шийдвэрээр)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1710" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Phase 5 ===== -->
+        <mxCell id="d3" value="«Хувийн тэтгэврийн сангийн хууль» батлагдсан уу?&#10;Private Pension Fund Law enacted?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1840" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="p15" value="ECIF-ийг тэтгэврийн сан болгон өөрчилнө&#10;Restructure ECIF into a pension fund&#10;(ХХОАТ-аас ₮1.2 сая хүртэл чөлөөлөлт)&#10;(personal income tax exemption up to MNT 1.2mn)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="660" y="1840" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="p16" value="2033 он — «Stable Growth Fund 2» руу шилжүүлнэ (10 жилийн хугацаатай)&#10;2033 — transfer into Stable Growth Fund 2 (10-year maturity)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1990" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== END ===== -->
+        <mxCell id="end" value="ТӨГСГӨЛ — ECIF мөчлөг дуусав&#10;ECIF lifecycle complete" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="2090" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Edges ===== -->
+        <mxCell id="e_start_p1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="start" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p1_p2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p1" target="p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p2_p3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p2" target="p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p3_p4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p3" target="p4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p4_p5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p4" target="p5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p5_p6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p5" target="p6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p6_p7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p6" target="p7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p7_p8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p7" target="p8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p8_p9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p8" target="p9"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p9_p10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p9" target="p10"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p10_d1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p10" target="d1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- monthly loop: investment back to contribution -->
+        <mxCell id="e_loop" value="Сар бүр давтагдана&#10;Repeats monthly" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#0e8088;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="p10" target="p5">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="290" y="1115" /><mxPoint x="290" y="595" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- d1 decisions -->
+        <mxCell id="e_d1_no" value="Үгүй / No → үргэлжлүүлэн хуримтлуулна" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#d6b656;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="d1" target="p5">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="980" y="1260" /><mxPoint x="980" y="595" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_d1_yes" value="Тийм / Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="d1" target="p11"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_p11_d2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p11" target="d2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_d2_no" value="Үгүй / No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;exitX=1;exitY=0.5;" edge="1" parent="1" source="d2" target="p12"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_d2_yes" value="Тийм / Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="d2" target="p13"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p13_p14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p13" target="p14"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p14_d3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p14" target="d3"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- p12 (unvested stays) rejoins fund pool -->
+        <mxCell id="e_p12_back" value="Санд үлдэнэ / Stays in Fund" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#b85450;exitX=0.5;exitY=0;entryX=1;entryY=0.5;" edge="1" parent="1" source="p12" target="p8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="800" y="910" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- d3 decisions -->
+        <mxCell id="e_d3_yes" value="Тийм / Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;exitX=1;exitY=0.5;" edge="1" parent="1" source="d3" target="p15"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_d3_no" value="Үгүй / No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="d3" target="p16"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p15_end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;entryX=0.5;entryY=0;" edge="1" parent="1" source="p15" target="end"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_p16_end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="p16" target="end"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
